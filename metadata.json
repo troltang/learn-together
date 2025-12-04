@@ -1,0 +1,7 @@
+{
+  "name": "启蒙乐园 (Enlightenment Park)",
+  "description": "A comprehensive educational platform for Chinese children covering English, Chinese, Pinyin, Literacy, and Science using AI.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
