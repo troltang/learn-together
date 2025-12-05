@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { AppView, FlashCard, LoadingState, EvaluationResult, Difficulty, HandwritingResult, HistoryItem } from '../types';
 import * as GeminiService from '../services/geminiService';
@@ -6,9 +5,7 @@ import { speakSequential, cancelAudio, startSpeechRecognition, speakText } from 
 import Loading from '../components/Loading';
 import WritingPad from '../components/WritingPad';
 import Celebration from '../components/Celebration';
-
-// Declare HanziWriter global
-declare const HanziWriter: any;
+import HanziWriter from 'hanzi-writer';
 
 interface FlashCardViewProps {
   mode: AppView.ENGLISH | AppView.CHINESE;
@@ -65,7 +62,7 @@ const FlashCardView: React.FC<FlashCardViewProps> = ({ mode, difficulty, onUpdat
 
   const initializedRef = useRef(false);
   const hanziContainerRef = useRef<HTMLDivElement>(null);
-  const writerRef = useRef<any>(null);
+  const writerRef = useRef<HanziWriter | null>(null);
 
   // Reset on Mode Change
   useEffect(() => {

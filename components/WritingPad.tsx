@@ -1,9 +1,6 @@
-
 import React, { useRef, useEffect, useState } from 'react';
 import { blobToBase64 } from '../utils/audioUtils';
-
-// Declare global HanziWriter
-declare const HanziWriter: any;
+import HanziWriter from 'hanzi-writer';
 
 interface WritingPadProps {
   target: string;
