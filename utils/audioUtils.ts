@@ -1,4 +1,8 @@
 
+
+// Track the active timeout to allow cancellation of sequential speech
+let activeSequenceTimeout: any = null;
+
 export function blobToBase64(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -18,22 +22,81 @@ export function blobToBase64(blob: Blob): Promise<string> {
 
 // --- Native Web Speech API (China-Friendly & Fast) ---
 
-export const speakText = (text: string, lang: 'en' | 'zh' = 'zh') => {
-  if (!window.speechSynthesis) {
-    console.warn("Browser does not support TTS");
-    return;
+// Helper to get the best available voice
+const getBestVoice = (lang: 'en' | 'zh') => {
+  const voices = window.speechSynthesis.getVoices();
+  const langCode = lang === 'en' ? 'en' : 'zh';
+  
+  // Priority: Google > Microsoft > Apple > Others
+  // We prefer "Google US English" or "Google Chinese" as they sound very natural
+  return voices.find(v => v.lang.startsWith(langCode) && v.name.includes('Google')) ||
+         voices.find(v => v.lang.startsWith(langCode) && v.name.includes('Microsoft')) ||
+         voices.find(v => v.lang.startsWith(langCode));
+};
+
+export const cancelAudio = () => {
+  if (window.speechSynthesis) {
+    window.speechSynthesis.cancel();
+  }
+  if (activeSequenceTimeout) {
+    clearTimeout(activeSequenceTimeout);
+    activeSequenceTimeout = null;
+  }
+};
+
+export const speakText = (text: string, lang: 'en' | 'zh' = 'zh'): Promise<void> => {
+  return new Promise((resolve) => {
+    if (!window.speechSynthesis) {
+      console.warn("Browser does not support TTS");
+      resolve();
+      return;
+    }
+    
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = lang === 'en' ? 'en-US' : 'zh-CN';
+    
+    const bestVoice = getBestVoice(lang);
+    if (bestVoice) {
+      utterance.voice = bestVoice;
+    }
+    
+    // 0.7 is slower and clearer for kids
+    utterance.rate = 0.7; 
+    utterance.pitch = 1.0; 
+
+    utterance.onend = () => {
+      resolve();
+    };
+
+    utterance.onerror = () => {
+      resolve(); 
+    };
+
+    window.speechSynthesis.speak(utterance);
+  });
+};
+
+export const speakSequential = async (
+  text1: string, 
+  lang1: 'en' | 'zh', 
+  text2: string, 
+  lang2: 'en' | 'zh'
+) => {
+  cancelAudio();
+  await speakText(text1, lang1);
+
+  await new Promise<void>((resolve) => {
+    activeSequenceTimeout = setTimeout(() => {
+      activeSequenceTimeout = null;
+      resolve();
+    }, 800); 
+  });
+
+  if (!window.speechSynthesis.speaking && !window.speechSynthesis.pending) {
+     // If the synthesis was completely stopped (cancelled), we might want to skip.
   }
   
-  // Cancel current speech to avoid queue buildup
-  window.speechSynthesis.cancel();
-
-  const utterance = new SpeechSynthesisUtterance(text);
-  // Map internal lang code to BCP 47 tag
-  utterance.lang = lang === 'en' ? 'en-US' : 'zh-CN';
-  utterance.rate = 0.9; // Slightly slower for children
-  utterance.pitch = 1.1; // Slightly higher pitch for friendliness
-
-  window.speechSynthesis.speak(utterance);
+  await speakText(text2, lang2);
 };
 
 export const startSpeechRecognition = (
@@ -56,8 +119,10 @@ export const startSpeechRecognition = (
   recognition.interimResults = false;
 
   recognition.onresult = (event: any) => {
-    const transcript = event.results[0][0].transcript;
-    onResult(transcript);
+    if (event.results.length > 0) {
+      const transcript = event.results[0][0].transcript;
+      onResult(transcript);
+    }
   };
 
   recognition.onend = () => {
@@ -66,7 +131,6 @@ export const startSpeechRecognition = (
 
   recognition.onerror = (event: any) => {
     console.error("Speech recognition error", event.error);
-    // Ignore 'no-speech' errors which happen frequently
     if (event.error !== 'no-speech') {
       onError("语音识别出错");
     }

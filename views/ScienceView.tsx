@@ -1,22 +1,36 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import * as GeminiService from '../services/geminiService';
-import { ScienceQA, LoadingState } from '../types';
+import { ScienceQA, LoadingState, Difficulty } from '../types';
 import Loading from '../components/Loading';
 import { speakText, startSpeechRecognition } from '../utils/audioUtils';
 
 interface ScienceViewProps {
   onUpdateProgress: (xp: number, items: number) => void;
+  difficulty: Difficulty;
+  initialData?: ScienceQA;
+  onAddToHistory: (data: ScienceQA) => void;
 }
 
-const ScienceView: React.FC<ScienceViewProps> = ({ onUpdateProgress }) => {
+const ScienceView: React.FC<ScienceViewProps> = ({ onUpdateProgress, difficulty, initialData, onAddToHistory }) => {
   const [query, setQuery] = useState('');
-  const [history, setHistory] = useState<ScienceQA[]>([]);
+  const [history, setHistory] = useState<(ScienceQA & { generatedImage?: string })[]>([]);
   const [status, setStatus] = useState<LoadingState>(LoadingState.IDLE);
   
   // Voice Input State
   const [isRecording, setIsRecording] = useState(false);
   const recognitionRef = useRef<any>(null);
+  
+  // Ref to track initialization
+  const initializedRef = useRef(false);
+
+  // Restore history logic
+  useEffect(() => {
+    if (initialData && !initializedRef.current) {
+      setHistory([initialData]);
+      initializedRef.current = true;
+    }
+  }, [initialData]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -39,14 +53,26 @@ const ScienceView: React.FC<ScienceViewProps> = ({ onUpdateProgress }) => {
     setQuery(''); // Clear input
     
     try {
-      const qa = await GeminiService.askScienceQuestion(questionText);
-      setHistory(prev => [qa, ...prev]);
+      const qa = await GeminiService.askScienceQuestion(questionText, difficulty);
+      
+      // Generate Image immediately
+      let generatedImg = "";
+      if (qa.imageUrl) {
+          generatedImg = await GeminiService.generateImageForCard(qa.imageUrl);
+      }
+      
+      const newEntry = { ...qa, generatedImage: generatedImg };
+      
+      setHistory(prev => [newEntry, ...prev]);
       setStatus(LoadingState.SUCCESS);
       
-      // Award XP for curiosity
+      // Award XP
       onUpdateProgress(10, 1);
 
-      // Auto-speak the answer
+      // Add to History
+      onAddToHistory(qa);
+
+      // Auto-speak
       speakAnswer(qa.answer);
       
     } catch (err) {
@@ -84,7 +110,7 @@ const ScienceView: React.FC<ScienceViewProps> = ({ onUpdateProgress }) => {
         <div className="bg-kid-blue p-3 rounded-full text-3xl">🐼</div>
         <div>
           <h2 className="font-bold text-lg">熊猫教授 (Professor Panda)</h2>
-          <p className="text-gray-500 text-sm">点击麦克风提问，我会告诉你答案！(搜索真实网络图片)</p>
+          <p className="text-gray-500 text-sm">点击麦克风提问，我会告诉你答案并画给你看！</p>
         </div>
       </div>
 
@@ -111,10 +137,17 @@ const ScienceView: React.FC<ScienceViewProps> = ({ onUpdateProgress }) => {
               <div className="bg-white border border-gray-100 p-5 rounded-2xl rounded-tl-sm shadow-md max-w-[90%] space-y-4">
                  <div className="flex items-start gap-3">
                    <div className="text-2xl mt-1">🐼</div>
-                   <div className="space-y-2">
+                   <div className="space-y-2 w-full">
                      <p className="text-lg text-gray-800 leading-relaxed">{item.answer}</p>
                      
-                     <div className="flex gap-2">
+                     {/* Inline Image Display */}
+                     {item.generatedImage && (
+                        <div className="mt-2 rounded-xl overflow-hidden border border-gray-100 shadow-sm w-full max-w-sm">
+                            <img src={item.generatedImage} alt="Illustration" className="w-full h-auto object-cover" />
+                        </div>
+                     )}
+
+                     <div className="flex gap-2 flex-wrap">
                        <button 
                          onClick={() => speakAnswer(item.answer)}
                          className="text-kid-blue text-sm font-bold flex items-center gap-1 hover:bg-blue-50 px-2 py-1 rounded"
@@ -129,7 +162,7 @@ const ScienceView: React.FC<ScienceViewProps> = ({ onUpdateProgress }) => {
                            rel="noopener noreferrer"
                            className="text-kid-pink text-sm font-bold flex items-center gap-1 hover:bg-pink-50 px-2 py-1 rounded"
                          >
-                           🔍 查看图片 ({item.imageUrl})
+                           🔍 更多图片 ({item.imageUrl})
                          </a>
                        )}
                      </div>
@@ -143,7 +176,7 @@ const ScienceView: React.FC<ScienceViewProps> = ({ onUpdateProgress }) => {
         {status === LoadingState.LOADING && (
           <div className="flex justify-start">
              <div className="bg-white border border-gray-100 p-4 rounded-2xl shadow-sm">
-                <Loading text={isRecording ? "正在聆听..." : "熊猫教授正在思考(并朗读)..."} />
+                <Loading text={isRecording ? "正在聆听..." : "熊猫教授正在思考(并画画)..."} />
              </div>
           </div>
         )}

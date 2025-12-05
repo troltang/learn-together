@@ -1,5 +1,5 @@
 {
-  "name": "启蒙乐园 (Enlightenment Park)",
+  "name": "若一起学 (Learn Together)",
   "description": "A comprehensive educational platform for Chinese children covering English, Chinese, Pinyin, Literacy, and Science using AI.",
   "requestFramePermissions": [
     "microphone"
