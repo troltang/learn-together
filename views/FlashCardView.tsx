@@ -62,7 +62,7 @@ const FlashCardView: React.FC<FlashCardViewProps> = ({ mode, difficulty, onUpdat
 
   const initializedRef = useRef(false);
   const hanziContainerRef = useRef<HTMLDivElement>(null);
-  const writerRef = useRef<HanziWriter | null>(null);
+  const writerRef = useRef<any>(null);
 
   // Reset on Mode Change
   useEffect(() => {

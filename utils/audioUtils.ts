@@ -1,14 +1,13 @@
 
-
 // Track the active timeout to allow cancellation of sequential speech
 let activeSequenceTimeout: any = null;
+let currentAudio: HTMLAudioElement | null = null; // Track fallback audio (Youdao)
 
 export function blobToBase64(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onloadend = () => {
       if (typeof reader.result === 'string') {
-        // Remove "data:audio/webm;base64," prefix
         const base64 = reader.result.split(',')[1];
         resolve(base64);
       } else {
@@ -20,23 +19,68 @@ export function blobToBase64(blob: Blob): Promise<string> {
   });
 }
 
-// --- Native Web Speech API (China-Friendly & Fast) ---
+// --- Voice Configuration ---
 
-// Helper to get the best available voice
 const getBestVoice = (lang: 'en' | 'zh') => {
   const voices = window.speechSynthesis.getVoices();
   const langCode = lang === 'en' ? 'en' : 'zh';
   
-  // Priority: Google > Microsoft > Apple > Others
-  // We prefer "Google US English" or "Google Chinese" as they sound very natural
-  return voices.find(v => v.lang.startsWith(langCode) && v.name.includes('Google')) ||
-         voices.find(v => v.lang.startsWith(langCode) && v.name.includes('Microsoft')) ||
-         voices.find(v => v.lang.startsWith(langCode));
+  // Priority: Microsoft/Google (Quality) > System Default
+  // We prioritize "Xiaoxiao" or "Yunxi" for Chinese as they are high quality Azure voices often available in Edge
+  if (langCode === 'zh') {
+      return voices.find(v => v.name.includes('Xiaoxiao') || v.name.includes('Yunxi')) || 
+             voices.find(v => v.lang.includes('zh') && (v.name.includes('Microsoft') || v.name.includes('Google'))) ||
+             voices.find(v => v.lang.startsWith('zh'));
+  } else {
+      return voices.find(v => v.lang.startsWith('en') && (v.name.includes('Google') || v.name.includes('Microsoft'))) ||
+             voices.find(v => v.lang.startsWith('en'));
+  }
+};
+
+// --- Fallback Audio (Youdao TTS - Reliable in China) ---
+
+const playFallbackAudio = (text: string, lang: 'en' | 'zh'): Promise<void> => {
+    return new Promise((resolve) => {
+        // Youdao API: le=en (English) or le=zh (Chinese)
+        const langParam = lang === 'en' ? 'en' : 'zh';
+        const url = `https://dict.youdao.com/dictvoice?audio=${encodeURIComponent(text)}&le=${langParam}`;
+        
+        if (currentAudio) {
+            currentAudio.pause();
+            currentAudio = null;
+        }
+
+        const audio = new Audio(url);
+        currentAudio = audio;
+        
+        // Try to slow down Youdao (usually fast) if browser supports it
+        audio.playbackRate = 0.85; 
+        
+        audio.onended = () => {
+            currentAudio = null;
+            resolve();
+        };
+        audio.onerror = (e) => {
+            console.warn("Fallback audio failed", e);
+            currentAudio = null;
+            resolve();
+        };
+        
+        // Handle promise rejection (autoplay policy)
+        audio.play().catch(e => {
+            console.warn("Audio play blocked", e);
+            resolve();
+        });
+    });
 };
 
 export const cancelAudio = () => {
   if (window.speechSynthesis) {
     window.speechSynthesis.cancel();
+  }
+  if (currentAudio) {
+    currentAudio.pause();
+    currentAudio = null;
   }
   if (activeSequenceTimeout) {
     clearTimeout(activeSequenceTimeout);
@@ -46,33 +90,76 @@ export const cancelAudio = () => {
 
 export const speakText = (text: string, lang: 'en' | 'zh' = 'zh'): Promise<void> => {
   return new Promise((resolve) => {
+    // 1. Check Browser Support
     if (!window.speechSynthesis) {
-      console.warn("Browser does not support TTS");
-      resolve();
-      return;
+        playFallbackAudio(text, lang).then(resolve);
+        return;
     }
-    
+
+    // 2. Setup Native TTS
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = lang === 'en' ? 'en-US' : 'zh-CN';
     
-    const bestVoice = getBestVoice(lang);
-    if (bestVoice) {
-      utterance.voice = bestVoice;
+    // Child-friendly settings
+    utterance.rate = 0.8; 
+    utterance.pitch = 1.2; 
+    utterance.volume = 1.0;
+
+    // Load voices if empty (Chrome quirk)
+    const voices = window.speechSynthesis.getVoices();
+    if (voices.length > 0) {
+        const v = getBestVoice(lang);
+        if (v) utterance.voice = v;
+    } else {
+        window.speechSynthesis.onvoiceschanged = () => {
+             const v = getBestVoice(lang);
+             if (v) utterance.voice = v;
+        };
     }
+
+    let hasStarted = false;
+    let fallbackTriggered = false;
+
+    // 3. Fallback Trigger Logic
+    const triggerFallback = () => {
+        if (fallbackTriggered) return;
+        fallbackTriggered = true;
+        
+        console.log("Switching to Youdao Fallback...");
+        window.speechSynthesis.cancel(); // Stop any pending native attempts
+        playFallbackAudio(text, lang).then(resolve);
+    };
+
+    utterance.onstart = () => { 
+        hasStarted = true; 
+    };
     
-    // 0.7 is slower and clearer for kids
-    utterance.rate = 0.7; 
-    utterance.pitch = 1.0; 
-
     utterance.onend = () => {
-      resolve();
+        if (!fallbackTriggered) resolve();
+    };
+    
+    utterance.onerror = (e) => {
+        // 'interrupted' or 'canceled' happens when we call cancelAudio(), not a failure
+        if (e.error !== 'interrupted' && e.error !== 'canceled') {
+            if (!hasStarted && !fallbackTriggered) {
+                 console.warn("TTS Error", e);
+                 triggerFallback();
+            } else if (!fallbackTriggered) {
+                resolve();
+            }
+        }
     };
 
-    utterance.onerror = () => {
-      resolve(); 
-    };
-
+    // 4. Start Speaking
     window.speechSynthesis.speak(utterance);
+
+    // 5. Watchdog Timer (500ms)
+    // Many Android WebViews or non-standard browsers implement the API but don't actually speak without a user gesture or have latency.
+    setTimeout(() => {
+        if (!hasStarted && !window.speechSynthesis.speaking) {
+            triggerFallback();
+        }
+    }, 500);
   });
 };
 
@@ -89,11 +176,13 @@ export const speakSequential = async (
     activeSequenceTimeout = setTimeout(() => {
       activeSequenceTimeout = null;
       resolve();
-    }, 800); 
+    }, 600); 
   });
-
-  if (!window.speechSynthesis.speaking && !window.speechSynthesis.pending) {
-     // If the synthesis was completely stopped (cancelled), we might want to skip.
+  
+  // Check cancellation
+  if (!activeSequenceTimeout && !window.speechSynthesis.speaking && !currentAudio) {
+      // Cancelled
+      return; 
   }
   
   await speakText(text2, lang2);
@@ -130,7 +219,6 @@ export const startSpeechRecognition = (
   };
 
   recognition.onerror = (event: any) => {
-    console.error("Speech recognition error", event.error);
     if (event.error !== 'no-speech') {
       onError("语音识别出错");
     }

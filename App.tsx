@@ -33,16 +33,14 @@ const App: React.FC = () => {
   // Restoration State
   const [initialFlashCard, setInitialFlashCard] = useState<FlashCard | undefined>(undefined);
   const [initialScienceQA, setInitialScienceQA] = useState<ScienceQA | undefined>(undefined);
-  // Key to force re-render when restoring history
   const [viewKey, setViewKey] = useState(0);
 
-  // Load from LocalStorage on mount
+  // Load from LocalStorage
   useEffect(() => {
     const savedProgress = localStorage.getItem('kid_app_progress');
     if (savedProgress) {
       try {
         const parsed = JSON.parse(savedProgress);
-        // Ensure keys exist for older saves
         if (!parsed[AppView.GAME]) parsed[AppView.GAME] = { ...INITIAL_MODULE_STATE };
         if (!parsed[AppView.SCENE]) parsed[AppView.SCENE] = { ...INITIAL_MODULE_STATE };
         setProgress(prev => ({ ...prev, ...parsed }));
@@ -57,7 +55,6 @@ const App: React.FC = () => {
     }
   }, []);
 
-  // Save to LocalStorage on change
   useEffect(() => {
     localStorage.setItem('kid_app_progress', JSON.stringify(progress));
   }, [progress]);
@@ -66,6 +63,7 @@ const App: React.FC = () => {
     localStorage.setItem('kid_app_history', JSON.stringify(history));
   }, [history]);
 
+  // Fix: Explicitly type 'view' to be a key of UserProgress (excluding HOME)
   const handleUpdateProgress = (view: keyof UserProgress, xpDelta: number, itemsDelta: number = 0) => {
     setProgress(prev => {
       const currentModule = prev[view] || { ...INITIAL_MODULE_STATE };
@@ -89,7 +87,7 @@ const App: React.FC = () => {
       id: Date.now().toString() + Math.random().toString().slice(2, 6),
       timestamp: Date.now()
     };
-    setHistory(prev => [newItem, ...prev].slice(0, 50)); // Keep last 50 items
+    setHistory(prev => [newItem, ...prev].slice(0, 50));
   };
 
   const handleRestoreHistory = (item: HistoryItem) => {
@@ -102,7 +100,7 @@ const App: React.FC = () => {
       setInitialFlashCard(undefined);
       setCurrentView(AppView.SCIENCE);
     }
-    setViewKey(prev => prev + 1); // Force re-mount of view to load initial data
+    setViewKey(prev => prev + 1);
   };
 
   const handleNavigate = (view: AppView) => {
@@ -114,7 +112,7 @@ const App: React.FC = () => {
     setCurrentView(view);
   };
 
-  const totalScore = Object.values(progress).reduce((acc, curr) => acc + (curr?.xp || 0), 0);
+  const totalScore = Object.values(progress).reduce((acc, curr) => acc + ((curr as ModuleProgress)?.xp || 0), 0);
 
   const renderContent = () => {
     switch (currentView) {
