@@ -4,8 +4,8 @@ import HanziWriter from 'hanzi-writer';
 
 interface WritingPadProps {
   target: string;
-  isChinese: boolean; // True for Tian Zi Ge, False for 4-line grid
-  strokeGuideUrl?: string | null; // URL for SVG overlay (Chinese) or font (English)
+  isChinese: boolean; 
+  strokeGuideUrl?: string | null; 
   onGrade: (base64: string) => void;
   isGrading: boolean;
 }
@@ -25,33 +25,26 @@ const WritingPad: React.FC<WritingPadProps> = ({ target, isChinese, strokeGuideU
 
     const resizeCanvas = () => {
         const rect = container.getBoundingClientRect();
-        // Set actual canvas size to match display size for 1:1 mapping
         canvas.width = rect.width;
         canvas.height = rect.height;
-        
         const ctx = canvas.getContext('2d');
         if (ctx) {
             ctx.lineCap = 'round';
             ctx.lineJoin = 'round';
-            ctx.strokeStyle = '#2d2d2d'; 
-            ctx.lineWidth = 6;
+            ctx.strokeStyle = '#1F2937'; // Darker stroke for user input
+            ctx.lineWidth = 8;
         }
     };
-
-    // Initial resize
     resizeCanvas();
-    
-    // Optional: Resize observer if container changes size
     const resizeObserver = new ResizeObserver(() => resizeCanvas());
     resizeObserver.observe(container);
-
     return () => resizeObserver.disconnect();
   }, [isChinese, target]);
 
-  // Initialize Background HanziWriter
+  // Initialize Background HanziWriter with Darker Guide
   useEffect(() => {
     if (isChinese && backgroundWriterRef.current) {
-        backgroundWriterRef.current.innerHTML = ''; // Clear previous
+        backgroundWriterRef.current.innerHTML = ''; 
         const char = target.charAt(0);
         
         if (/[\u4e00-\u9fa5]/.test(char)) {
@@ -62,10 +55,10 @@ const WritingPad: React.FC<WritingPadProps> = ({ target, isChinese, strokeGuideU
                     padding: 5,
                     showOutline: true,
                     strokeAnimationSpeed: 1,
-                    delayBetweenLoops: 1000,
-                    strokeColor: '#d1d5db', // Light gray for guide
-                    radicalColor: '#d1d5db', 
-                    outlineColor: '#e5e7eb',
+                    delayBetweenLoops: 1500, // Longer delay
+                    strokeColor: '#9CA3AF', // Darker grey for visibility
+                    radicalColor: '#9CA3AF', 
+                    outlineColor: '#D1D5DB',
                     onLoadCharDataSuccess: () => {
                         writer.loopCharacterAnimation();
                     }
@@ -77,7 +70,8 @@ const WritingPad: React.FC<WritingPadProps> = ({ target, isChinese, strokeGuideU
     }
   }, [isChinese, target]);
 
-  // Event Handlers
+  // Event Handlers (omitted for brevity, same as before)
+  // ... (Keep existing touch/mouse handlers) ...
   useEffect(() => {
       const canvas = canvasRef.current;
       if (!canvas) return;
@@ -85,7 +79,6 @@ const WritingPad: React.FC<WritingPadProps> = ({ target, isChinese, strokeGuideU
       const getCoordinates = (e: MouseEvent | TouchEvent) => {
           const rect = canvas.getBoundingClientRect();
           let clientX, clientY;
-          
           if ('touches' in e) {
               clientX = e.touches[0].clientX;
               clientY = e.touches[0].clientY;
@@ -93,53 +86,39 @@ const WritingPad: React.FC<WritingPadProps> = ({ target, isChinese, strokeGuideU
               clientX = (e as MouseEvent).clientX;
               clientY = (e as MouseEvent).clientY;
           }
-          
-          return {
-              x: clientX - rect.left,
-              y: clientY - rect.top
-          };
+          return { x: clientX - rect.left, y: clientY - rect.top };
       };
 
       const startDrawing = (e: MouseEvent | TouchEvent) => {
-          // Important: prevent scrolling on touch devices
           if (e.cancelable) e.preventDefault();
-          
+          e.stopPropagation(); 
           isDrawingRef.current = true;
           setHasDrawn(true);
-          
           const { x, y } = getCoordinates(e);
           const ctx = canvas.getContext('2d');
-          if (ctx) {
-              ctx.beginPath();
-              ctx.moveTo(x, y);
-          }
+          if (ctx) { ctx.beginPath(); ctx.moveTo(x, y); }
       };
 
       const draw = (e: MouseEvent | TouchEvent) => {
+          e.stopPropagation();
           if (!isDrawingRef.current) return;
           if (e.cancelable) e.preventDefault();
-
           const { x, y } = getCoordinates(e);
           const ctx = canvas.getContext('2d');
-          if (ctx) {
-              ctx.lineTo(x, y);
-              ctx.stroke();
-          }
+          if (ctx) { ctx.lineTo(x, y); ctx.stroke(); }
       };
 
       const stopDrawing = (e: MouseEvent | TouchEvent) => {
           if (e.cancelable) e.preventDefault();
+          e.stopPropagation();
           isDrawingRef.current = false;
       };
 
-      // Passive: false is crucial for touch events to allow preventDefault
       const opts = { passive: false };
-
       canvas.addEventListener('mousedown', startDrawing);
       canvas.addEventListener('mousemove', draw);
       canvas.addEventListener('mouseup', stopDrawing);
       canvas.addEventListener('mouseleave', stopDrawing);
-
       canvas.addEventListener('touchstart', startDrawing, opts);
       canvas.addEventListener('touchmove', draw, opts);
       canvas.addEventListener('touchend', stopDrawing, opts);
@@ -149,7 +128,6 @@ const WritingPad: React.FC<WritingPadProps> = ({ target, isChinese, strokeGuideU
           canvas.removeEventListener('mousemove', draw);
           canvas.removeEventListener('mouseup', stopDrawing);
           canvas.removeEventListener('mouseleave', stopDrawing);
-
           canvas.removeEventListener('touchstart', startDrawing);
           canvas.removeEventListener('touchmove', draw);
           canvas.removeEventListener('touchend', stopDrawing);
@@ -161,7 +139,6 @@ const WritingPad: React.FC<WritingPadProps> = ({ target, isChinese, strokeGuideU
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     setHasDrawn(false);
   };
@@ -184,14 +161,13 @@ const WritingPad: React.FC<WritingPadProps> = ({ target, isChinese, strokeGuideU
   };
 
   return (
-    <div className="flex flex-col items-center gap-3 w-full touch-none">
+    <div className="flex flex-col items-center gap-3 w-full touch-none" onMouseDown={e => e.stopPropagation()} onTouchStart={e => e.stopPropagation()}>
       <div 
         ref={containerRef}
         className={`relative border-4 border-kid-blue rounded-xl overflow-hidden bg-white shadow-inner ${
           isChinese ? 'w-[280px] h-[280px]' : 'w-full max-w-lg h-[200px]'
         }`}
       >
-        {/* Background Grid */}
         <div className="absolute inset-0 z-0 pointer-events-none opacity-20 select-none">
             {isChinese ? (
               <svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none">
@@ -211,13 +187,12 @@ const WritingPad: React.FC<WritingPadProps> = ({ target, isChinese, strokeGuideU
             )}
         </div>
 
-        {/* Reference Layer (Hanzi Animation or English Text) */}
         <div className="absolute inset-0 z-1 pointer-events-none flex items-center justify-center select-none">
            {isChinese ? (
-             <div ref={backgroundWriterRef} className="opacity-60"></div>
+             <div ref={backgroundWriterRef} className="opacity-100"></div> 
            ) : (
              <span 
-              className="font-mono text-gray-200 tracking-widest font-sans" 
+              className="font-mono text-gray-300 tracking-widest font-sans font-bold" 
               style={{ 
                 fontFamily: '"Fredoka", sans-serif', 
                 fontSize: getEnglishFontSize() 
@@ -228,7 +203,6 @@ const WritingPad: React.FC<WritingPadProps> = ({ target, isChinese, strokeGuideU
            )}
         </div>
 
-        {/* Canvas - Force touch-action none */}
         <canvas
           ref={canvasRef}
           className="absolute inset-0 z-20 w-full h-full cursor-crosshair touch-none"

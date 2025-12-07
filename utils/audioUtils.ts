@@ -1,8 +1,19 @@
+// utils/audioUtils.ts
+import { VoiceId } from '../types';
 
-// Track the active timeout to allow cancellation of sequential speech
-let activeSequenceTimeout: any = null;
-let currentAudio: HTMLAudioElement | null = null; // Track fallback audio (Youdao)
+let currentAudio: HTMLAudioElement | null = null;
+let sequenceCancelled = false;
 
+// Audio Cache: Map<Key, BlobUrl>
+const audioCache = new Map<string, string>();
+
+// Pending Requests: Map<Key, Promise<string>> (Deduplication)
+const pendingRequests = new Map<string, Promise<string>>();
+
+// Mutable Token
+let TTS_TOKEN = 'a72250317ca2ff2d27f01dabbef32ac3'; 
+
+// Convert Blob to Base64 (for writing pad)
 export function blobToBase64(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -19,173 +30,255 @@ export function blobToBase64(blob: Blob): Promise<string> {
   });
 }
 
-// --- Voice Configuration ---
+// --- Audio Types ---
+interface PlayableAudio {
+  play: () => Promise<void>;
+  dispose: () => void;
+}
 
-const getBestVoice = (lang: 'en' | 'zh') => {
-  const voices = window.speechSynthesis.getVoices();
-  const langCode = lang === 'en' ? 'en' : 'zh';
-  
-  // Priority: Microsoft/Google (Quality) > System Default
-  // We prioritize "Xiaoxiao" or "Yunxi" for Chinese as they are high quality Azure voices often available in Edge
-  if (langCode === 'zh') {
-      return voices.find(v => v.name.includes('Xiaoxiao') || v.name.includes('Yunxi')) || 
-             voices.find(v => v.lang.includes('zh') && (v.name.includes('Microsoft') || v.name.includes('Google'))) ||
-             voices.find(v => v.lang.startsWith('zh'));
-  } else {
-      return voices.find(v => v.lang.startsWith('en') && (v.name.includes('Google') || v.name.includes('Microsoft'))) ||
-             voices.find(v => v.lang.startsWith('en'));
-  }
+const AVAILABLE_VOICES = [
+  'zh-CN-XiaoyuMultilingualNeural', // Boy
+  'zh-CN-XiaoxiaoMultilingualNeural', // Young Woman
+  'zh-CN-XiaoshuangNeural' // Girl
+];
+
+export const clearAudioCache = () => {
+  audioCache.forEach((url) => URL.revokeObjectURL(url));
+  audioCache.clear();
+  pendingRequests.clear();
 };
 
-// --- Fallback Audio (Youdao TTS - Reliable in China) ---
+export const preloadAudio = async (text: string, voiceId: VoiceId) => {
+    // Just trigger the fetch/cache process, don't play
+    await getBestAudio(text, voiceId, false);
+};
 
-const playFallbackAudio = (text: string, lang: 'en' | 'zh'): Promise<void> => {
-    return new Promise((resolve) => {
-        // Youdao API: le=en (English) or le=zh (Chinese)
-        const langParam = lang === 'en' ? 'en' : 'zh';
-        const url = `https://dict.youdao.com/dictvoice?audio=${encodeURIComponent(text)}&le=${langParam}`;
+// Helper to refresh token from the homepage source
+const refreshTTSOnlineToken = async (): Promise<string | null> => {
+    try {
+        console.log("Attempting to refresh TTS token...");
+        const targetUrl = 'https://www.ttsonline.cn/';
+        // Use proxy to get the HTML content
+        const proxyUrl = 'https://seep.eu.org/' + encodeURIComponent(targetUrl);
         
-        if (currentAudio) {
-            currentAudio.pause();
-            currentAudio = null;
+        const response = await fetch(proxyUrl);
+        const html = await response.text();
+        
+        // Regex to find: const token = '...';
+        const match = html.match(/token\s*=\s*'([a-f0-9]+)'/);
+        if (match && match[1]) {
+            console.log("New TTS Token found:", match[1]);
+            TTS_TOKEN = match[1];
+            return match[1];
         }
+    } catch (e) {
+        console.error("Failed to refresh TTS token:", e);
+    }
+    return null;
+};
 
-        const audio = new Audio(url);
-        currentAudio = audio;
-        
-        // Try to slow down Youdao (usually fast) if browser supports it
-        audio.playbackRate = 0.85; 
-        
-        audio.onended = () => {
-            currentAudio = null;
-            resolve();
-        };
-        audio.onerror = (e) => {
-            console.warn("Fallback audio failed", e);
-            currentAudio = null;
-            resolve();
-        };
-        
-        // Handle promise rejection (autoplay policy)
-        audio.play().catch(e => {
-            console.warn("Audio play blocked", e);
-            resolve();
-        });
+// Helper to perform the actual fetch
+const performTTSFetch = async (text: string, voice: string, token: string): Promise<string> => {
+    const targetUrl = 'https://www.ttsonline.cn/getSpeek.php';
+    const proxyUrl = 'https://seep.eu.org/' + encodeURIComponent(targetUrl);
+
+    const params = new URLSearchParams();
+    params.append('language', '中文（普通话，简体）');
+    params.append('voice', voice);
+    params.append('text', text);
+    params.append('role', '0');
+    params.append('style', '0');
+    params.append('rate', '-5');
+    params.append('pitch', '0');
+    params.append('kbitrate', 'audio-16khz-32kbitrate-mono-mp3');
+    params.append('silence', '');
+    params.append('styledegree', '1');
+    params.append('volume', '75');
+    params.append('predict', '0');
+    params.append('yzm', '202409282320'); // Timestamp might need update too if strictly checked, but usually token is key
+    params.append('replice', '1');
+    params.append('token', token);
+
+    const response = await fetch(proxyUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: params
     });
+
+    if (!response.ok) throw new Error("Network response not ok");
+    
+    const data = await response.json();
+    
+    // Check for Token Error (402 or specific msg)
+    if (data.code === 402) {
+        throw new Error("TOKEN_EXPIRED");
+    }
+
+    if (data.code === 200 && data.download) {
+        // Fetch valid MP3
+        const fileUrl = data.download;
+        const proxyFileUrl = 'https://seep.eu.org/' + encodeURIComponent(fileUrl);
+        
+        const fileRes = await fetch(proxyFileUrl);
+        if (!fileRes.ok) throw new Error("Audio file fetch failed");
+        
+        const blob = await fileRes.blob();
+        return URL.createObjectURL(blob);
+    }
+    
+    throw new Error("API Error: " + (data.msg || "Unknown"));
+};
+
+// --- 1. Fetch & Prepare Audio (Parallel Capable) ---
+const getBestAudio = async (text: string, voiceId: VoiceId, returnPlayer: boolean = true): Promise<PlayableAudio | void> => {
+  if (!text) return { play: async () => {}, dispose: () => {} };
+
+  // Resolve Voice ID
+  let selectedVoice = voiceId;
+  if (selectedVoice === 'RANDOM') {
+    selectedVoice = AVAILABLE_VOICES[Math.floor(Math.random() * AVAILABLE_VOICES.length)] as VoiceId;
+  }
+
+  const cacheKey = `${selectedVoice}:${text}`;
+
+  // Strategy 0: Check Cache (Immediate)
+  if (audioCache.has(cacheKey)) {
+      if (!returnPlayer) return; // Preload finished basically
+      const blobUrl = audioCache.get(cacheKey)!;
+      const audio = new Audio(blobUrl);
+      return {
+          play: () => new Promise<void>((resolve) => {
+            if (sequenceCancelled) { resolve(); return; }
+            currentAudio = audio;
+            audio.onended = () => { currentAudio = null; resolve(); };
+            audio.onerror = () => { currentAudio = null; resolve(); };
+            audio.play().catch(() => resolve());
+          }),
+          dispose: () => {}
+      };
+  }
+
+  // Strategy 1: Check In-Flight Request (Deduplication)
+  if (pendingRequests.has(cacheKey)) {
+      try {
+          const blobUrl = await pendingRequests.get(cacheKey)!;
+          if (!returnPlayer) return;
+          const audio = new Audio(blobUrl);
+          return {
+              play: () => new Promise<void>((resolve) => {
+                if (sequenceCancelled) { resolve(); return; }
+                currentAudio = audio;
+                audio.onended = () => { currentAudio = null; resolve(); };
+                audio.onerror = () => { currentAudio = null; resolve(); };
+                audio.play().catch(() => resolve());
+              }),
+              dispose: () => {}
+          };
+      } catch (e) {
+          // If pending failed, fall through to native
+      }
+  }
+
+  // Strategy 2: Initiate New Fetch (TTSOnline)
+  const fetchPromise = (async () => {
+      try {
+          return await performTTSFetch(text, selectedVoice, TTS_TOKEN);
+      } catch (e: any) {
+          if (e.message === "TOKEN_EXPIRED") {
+              const newToken = await refreshTTSOnlineToken();
+              if (newToken) {
+                  return await performTTSFetch(text, selectedVoice, newToken);
+              }
+          }
+          throw e;
+      }
+  })();
+
+  // Store promise to prevent duplicate requests for same text
+  pendingRequests.set(cacheKey, fetchPromise);
+
+  try {
+    const blobUrl = await fetchPromise;
+    audioCache.set(cacheKey, blobUrl);
+    pendingRequests.delete(cacheKey); // Cleanup pending
+
+    if (!returnPlayer) return;
+
+    const audio = new Audio(blobUrl);
+    return {
+        play: () => new Promise<void>((resolve) => {
+          if (sequenceCancelled) { resolve(); return; }
+          currentAudio = audio;
+          audio.onended = () => { currentAudio = null; resolve(); };
+          audio.onerror = () => { currentAudio = null; resolve(); }; 
+          audio.play().catch(() => resolve());
+        }),
+        dispose: () => {}
+    };
+  } catch (e) {
+    pendingRequests.delete(cacheKey); // Cleanup failed pending
+    // console.warn("TTSOnline failed, falling back to native", e);
+  }
+
+  // Strategy 3: Browser Native (Fallback)
+  if (!returnPlayer) return;
+  return {
+    play: () => speakNative(text),
+    dispose: () => {}
+  };
+};
+
+// Native TTS Wrapper
+const speakNative = (text: string): Promise<void> => {
+  if (sequenceCancelled) return Promise.resolve();
+  return new Promise((resolve) => {
+    if (!window.speechSynthesis) { resolve(); return; }
+    
+    window.speechSynthesis.cancel();
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = 'zh-CN'; 
+    utterance.rate = 0.85; 
+    
+    const voices = window.speechSynthesis.getVoices();
+    const preferredVoice = voices.find(v => 
+      v.lang.includes('zh') && 
+      (v.name.includes("Google") || v.name.includes("Microsoft") || v.name.includes("Xiaoxiao"))
+    );
+    if (preferredVoice) utterance.voice = preferredVoice;
+
+    utterance.onend = () => resolve();
+    utterance.onerror = () => resolve(); 
+    window.speechSynthesis.speak(utterance);
+  });
 };
 
 export const cancelAudio = () => {
-  if (window.speechSynthesis) {
-    window.speechSynthesis.cancel();
-  }
+  sequenceCancelled = true;
   if (currentAudio) {
     currentAudio.pause();
     currentAudio = null;
   }
-  if (activeSequenceTimeout) {
-    clearTimeout(activeSequenceTimeout);
-    activeSequenceTimeout = null;
+  if (window.speechSynthesis) {
+    window.speechSynthesis.cancel();
   }
+  setTimeout(() => { sequenceCancelled = false; }, 50);
 };
 
-export const speakText = (text: string, lang: 'en' | 'zh' = 'zh'): Promise<void> => {
-  return new Promise((resolve) => {
-    // 1. Check Browser Support
-    if (!window.speechSynthesis) {
-        playFallbackAudio(text, lang).then(resolve);
-        return;
-    }
-
-    // 2. Setup Native TTS
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = lang === 'en' ? 'en-US' : 'zh-CN';
-    
-    // Child-friendly settings
-    utterance.rate = 0.8; 
-    utterance.pitch = 1.2; 
-    utterance.volume = 1.0;
-
-    // Load voices if empty (Chrome quirk)
-    const voices = window.speechSynthesis.getVoices();
-    if (voices.length > 0) {
-        const v = getBestVoice(lang);
-        if (v) utterance.voice = v;
-    } else {
-        window.speechSynthesis.onvoiceschanged = () => {
-             const v = getBestVoice(lang);
-             if (v) utterance.voice = v;
-        };
-    }
-
-    let hasStarted = false;
-    let fallbackTriggered = false;
-
-    // 3. Fallback Trigger Logic
-    const triggerFallback = () => {
-        if (fallbackTriggered) return;
-        fallbackTriggered = true;
-        
-        console.log("Switching to Youdao Fallback...");
-        window.speechSynthesis.cancel(); // Stop any pending native attempts
-        playFallbackAudio(text, lang).then(resolve);
-    };
-
-    utterance.onstart = () => { 
-        hasStarted = true; 
-    };
-    
-    utterance.onend = () => {
-        if (!fallbackTriggered) resolve();
-    };
-    
-    utterance.onerror = (e) => {
-        // 'interrupted' or 'canceled' happens when we call cancelAudio(), not a failure
-        if (e.error !== 'interrupted' && e.error !== 'canceled') {
-            if (!hasStarted && !fallbackTriggered) {
-                 console.warn("TTS Error", e);
-                 triggerFallback();
-            } else if (!fallbackTriggered) {
-                resolve();
-            }
-        }
-    };
-
-    // 4. Start Speaking
-    window.speechSynthesis.speak(utterance);
-
-    // 5. Watchdog Timer (500ms)
-    // Many Android WebViews or non-standard browsers implement the API but don't actually speak without a user gesture or have latency.
-    setTimeout(() => {
-        if (!hasStarted && !window.speechSynthesis.speaking) {
-            triggerFallback();
-        }
-    }, 500);
-  });
-};
-
-export const speakSequential = async (
-  text1: string, 
-  lang1: 'en' | 'zh', 
-  text2: string, 
-  lang2: 'en' | 'zh'
-) => {
+export const speakText = async (text: string, voiceId: VoiceId = 'RANDOM'): Promise<void> => {
   cancelAudio();
-  await speakText(text1, lang1);
-
-  await new Promise<void>((resolve) => {
-    activeSequenceTimeout = setTimeout(() => {
-      activeSequenceTimeout = null;
-      resolve();
-    }, 600); 
-  });
+  await new Promise(r => setTimeout(r, 50));
+  sequenceCancelled = false;
   
-  // Check cancellation
-  if (!activeSequenceTimeout && !window.speechSynthesis.speaking && !currentAudio) {
-      // Cancelled
-      return; 
+  const audioTask = await getBestAudio(text, voiceId);
+  if (audioTask && !sequenceCancelled) {
+    await audioTask.play();
+    audioTask.dispose();
   }
-  
-  await speakText(text2, lang2);
+};
+
+export const playCombinedAudio = async (text: string, voiceId: VoiceId) => {
+    return speakText(text, voiceId);
 };
 
 export const startSpeechRecognition = (
@@ -198,7 +291,7 @@ export const startSpeechRecognition = (
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   
   if (!SpeechRecognition) {
-    onError("您的浏览器不支持语音识别，请使用Chrome或Safari");
+    onError("您的浏览器不支持语音识别");
     return null;
   }
 
@@ -214,12 +307,10 @@ export const startSpeechRecognition = (
     }
   };
 
-  recognition.onend = () => {
-    onEnd();
-  };
-
+  recognition.onend = () => { onEnd(); };
   recognition.onerror = (event: any) => {
     if (event.error !== 'no-speech') {
+      console.warn("Speech recognition error:", event.error);
       onError("语音识别出错");
     }
     onEnd();

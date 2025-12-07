@@ -1,14 +1,16 @@
 
 import React from 'react';
-import { AppView, Difficulty } from '../types';
+import { AppView, Age, VoiceId } from '../types';
 
 interface LayoutProps {
   children: React.ReactNode;
   currentView: AppView;
   onNavigate: (view: AppView) => void;
   score?: number;
-  difficulty: Difficulty;
-  onSetDifficulty: (d: Difficulty) => void;
+  age: Age;
+  onSetAge: (a: Age) => void;
+  voiceId: VoiceId;
+  onSetVoiceId: (v: VoiceId) => void;
   onOpenHistory: () => void;
 }
 
@@ -17,8 +19,10 @@ const Layout: React.FC<LayoutProps> = ({
   currentView, 
   onNavigate, 
   score = 0,
-  difficulty,
-  onSetDifficulty,
+  age,
+  onSetAge,
+  voiceId,
+  onSetVoiceId,
   onOpenHistory
 }) => {
   return (
@@ -42,20 +46,32 @@ const Layout: React.FC<LayoutProps> = ({
           
           <div className="flex items-center gap-2 sm:gap-4 overflow-x-auto no-scrollbar">
             
-            {/* Difficulty Selector */}
-            <div className="relative group">
+            {/* Age Selector */}
+            <div className="flex items-center bg-indigo-50 rounded-full px-2 py-1 border border-indigo-100">
+              <span className="text-[10px] font-bold text-indigo-400 mr-1 hidden sm:inline">AGE</span>
               <select 
-                value={difficulty}
-                onChange={(e) => onSetDifficulty(e.target.value as Difficulty)}
-                className="appearance-none bg-indigo-50 border border-indigo-100 text-indigo-700 text-sm font-bold py-1 px-3 pr-6 rounded-full focus:outline-none cursor-pointer hover:bg-indigo-100 transition-colors"
+                value={age}
+                onChange={(e) => onSetAge(parseInt(e.target.value))}
+                className="appearance-none bg-transparent text-indigo-700 font-black text-sm sm:text-lg focus:outline-none cursor-pointer hover:text-indigo-500 text-center w-10 sm:w-12"
               >
-                <option value={Difficulty.EASY}>⭐ 初级 (Easy)</option>
-                <option value={Difficulty.MEDIUM}>⭐⭐ 中级 (Medium)</option>
-                <option value={Difficulty.HARD}>⭐⭐⭐ 高级 (Hard)</option>
+                {[3,4,5,6,7,8,9,10,11,12].map(a => (
+                  <option key={a} value={a}>{a}岁</option>
+                ))}
               </select>
-              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-indigo-700">
-                <svg className="fill-current h-3 w-3" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/></svg>
-              </div>
+            </div>
+
+            {/* Voice Selector */}
+            <div className="flex items-center bg-pink-50 rounded-full px-2 py-1 border border-pink-100">
+              <select 
+                value={voiceId}
+                onChange={(e) => onSetVoiceId(e.target.value as VoiceId)}
+                className="appearance-none bg-transparent text-pink-700 font-bold text-sm sm:text-base focus:outline-none cursor-pointer hover:text-pink-500 text-center px-1"
+                title="选择AI语音"
+              >
+                <option value="RANDOM">🎲 随机</option>
+                <option value="zh-CN-XiaoyuMultilingualNeural">👦 浩浩</option>
+                <option value="zh-CN-XiaoshuangNeural">👧 霜霜</option>
+              </select>
             </div>
 
              {/* Score Board */}

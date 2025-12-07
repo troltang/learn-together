@@ -1,169 +1,165 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import * as GeminiService from '../services/geminiService';
-import { ScienceQA, LoadingState, Difficulty } from '../types';
+import { ScienceQA, LoadingState, Age, VoiceId } from '../types';
 import Loading from '../components/Loading';
-import { speakText, startSpeechRecognition } from '../utils/audioUtils';
+import { speakText, startSpeechRecognition, cancelAudio } from '../utils/audioUtils';
+import { preloadImage } from '../utils/imageUtils';
 
 interface ScienceViewProps {
   onUpdateProgress: (xp: number, items: number) => void;
-  difficulty: Difficulty;
+  difficulty: Age; // Mapped to Age
+  voiceId: VoiceId;
   initialData?: ScienceQA;
   onAddToHistory: (data: ScienceQA) => void;
 }
 
-const ScienceView: React.FC<ScienceViewProps> = ({ onUpdateProgress, difficulty, initialData, onAddToHistory }) => {
-  const [query, setQuery] = useState('');
-  const [history, setHistory] = useState<(ScienceQA & { generatedImage?: string })[]>([]);
+const ScienceView: React.FC<ScienceViewProps> = ({ onUpdateProgress, difficulty: age, voiceId, initialData, onAddToHistory }) => {
+  // Chat History for API Context
+  const [chatContext, setChatContext] = useState<{role: string, content: string}[]>([]);
+  // Display History
+  const [displayHistory, setDisplayHistory] = useState<(ScienceQA & { generatedImage?: string })[]>([]);
+  
   const [status, setStatus] = useState<LoadingState>(LoadingState.IDLE);
-  
-  // Voice Input State
   const [isRecording, setIsRecording] = useState(false);
+  const [suggestions, setSuggestions] = useState<string[]>([]);
   const recognitionRef = useRef<any>(null);
-  
-  // Ref to track initialization
   const initializedRef = useRef(false);
+  const chatContainerRef = useRef<HTMLDivElement>(null);
 
-  // Restore history logic
+  useEffect(() => {
+    // Load Suggestions on mount or age change
+    GeminiService.getScienceSuggestions(age).then(setSuggestions);
+  }, [age]);
+
   useEffect(() => {
     if (initialData && !initializedRef.current) {
-      setHistory([initialData]);
+      setDisplayHistory([initialData]);
+      setChatContext([
+          { role: 'user', content: initialData.question },
+          { role: 'assistant', content: initialData.answer }
+      ]);
       initializedRef.current = true;
     }
   }, [initialData]);
 
-  // Cleanup on unmount
   useEffect(() => {
-    return () => {
-      if (recognitionRef.current) {
-        try { recognitionRef.current.stop(); } catch(e) {}
-      }
+    if (chatContainerRef.current) {
+        chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+    }
+  }, [displayHistory, status]);
+
+  // Audio Cleanup
+  useEffect(() => {
+    return () => { 
+        if (recognitionRef.current) try { recognitionRef.current.stop(); } catch(e) {};
+        cancelAudio();
     };
   }, []);
 
-  const speakAnswer = (text: string) => {
-    speakText(text, 'zh');
-  };
+  const speakAnswer = (text: string) => { speakText(text, voiceId); };
 
-  const handleAsk = async (textOverride?: string) => {
-    const questionText = textOverride || query;
+  const handleAsk = async (questionText: string) => {
     if (!questionText.trim()) return;
-
     setStatus(LoadingState.LOADING);
-    setQuery(''); // Clear input
     
+    // Optimistically add user question? No, wait for response to show pair
     try {
-      const qa = await GeminiService.askScienceQuestion(questionText, difficulty);
-      
-      // Generate Image immediately
+      const qa = await GeminiService.askScienceQuestion(questionText, age, chatContext);
       let generatedImg = "";
       if (qa.imageUrl) {
           generatedImg = await GeminiService.generateImageForCard(qa.imageUrl);
+          preloadImage(generatedImg);
       }
-      
       const newEntry = { ...qa, generatedImage: generatedImg };
       
-      setHistory(prev => [newEntry, ...prev]);
+      setDisplayHistory(prev => [...prev, newEntry]);
+      setChatContext(prev => [
+          ...prev, 
+          { role: 'user', content: questionText }, 
+          { role: 'assistant', content: qa.answer }
+      ]);
+      
       setStatus(LoadingState.SUCCESS);
-      
-      // Award XP
-      onUpdateProgress(10, 1);
-
-      // Add to History
       onAddToHistory(qa);
-
-      // Auto-speak
       speakAnswer(qa.answer);
-      
-    } catch (err) {
-      console.error(err);
-      setStatus(LoadingState.ERROR);
+    } catch (err) { 
+        console.error(err); 
+        setStatus(LoadingState.ERROR); 
     }
   };
 
   const startListening = () => {
-    if (isRecording) {
-      if (recognitionRef.current) recognitionRef.current.stop();
-      setIsRecording(false);
-      return;
-    }
-
+    if (isRecording) return;
     setIsRecording(true);
-    recognitionRef.current = startSpeechRecognition(
-      'zh',
-      (text) => {
-        setQuery(text);
-        handleAsk(text);
-      },
-      () => setIsRecording(false),
-      (err) => {
-        alert(err);
-        setIsRecording(false);
-      }
-    );
+    recognitionRef.current = startSpeechRecognition('zh', (text) => { handleAsk(text); }, () => setIsRecording(false), (err) => { alert(err); setIsRecording(false); });
   };
+
+  const stopListening = () => {
+      if (recognitionRef.current) try { recognitionRef.current.stop(); } catch(e) {};
+      setIsRecording(false);
+  }
 
   return (
     <div className="h-[calc(100vh-140px)] flex flex-col max-w-2xl mx-auto">
       {/* Header */}
-      <div className="bg-white p-4 rounded-2xl shadow-sm mb-4 flex items-center gap-4">
-        <div className="bg-kid-blue p-3 rounded-full text-3xl">🐼</div>
+      <div className="bg-gradient-to-r from-kid-blue to-blue-400 p-4 rounded-2xl shadow-md mb-4 flex items-center gap-4 text-white">
+        <div className="bg-white/20 p-2 rounded-full text-3xl backdrop-blur-sm">🪐</div>
         <div>
-          <h2 className="font-bold text-lg">熊猫教授 (Professor Panda)</h2>
-          <p className="text-gray-500 text-sm">点击麦克风提问，我会告诉你答案并画给你看！</p>
+          <h2 className="font-black text-xl tracking-wide">十万个为什么</h2>
+          <p className="opacity-90 text-sm">Professor Panda 的科学百科全书</p>
         </div>
       </div>
 
       {/* Chat Area */}
-      <div className="flex-1 overflow-y-auto space-y-6 pr-2 no-scrollbar pb-4">
-        {history.length === 0 && status === LoadingState.IDLE && (
-          <div className="flex flex-col items-center justify-center h-full text-gray-400 opacity-50">
-            <span className="text-6xl mb-4">🔬</span>
-            <p>等待你的提问...</p>
+      <div ref={chatContainerRef} className="flex-1 overflow-y-auto space-y-6 pr-2 no-scrollbar pb-4 scroll-smooth">
+        {/* Welcome / Suggestions */}
+        {displayHistory.length === 0 && status === LoadingState.IDLE && (
+          <div className="flex flex-col items-center justify-center h-full text-center space-y-6 animate-fade-in">
+            <div className="text-6xl animate-bounce">🐼</div>
+            <p className="text-gray-500 font-bold text-lg">你想知道什么呢？</p>
+            <div className="flex flex-wrap justify-center gap-2 max-w-sm">
+                {suggestions.map((s, i) => (
+                    <button key={i} onClick={() => handleAsk(s)} className="bg-white border-2 border-kid-blue/30 text-kid-blue px-4 py-2 rounded-full font-bold shadow-sm hover:bg-kid-blue hover:text-white transition-all text-sm">
+                        {s}
+                    </button>
+                ))}
+            </div>
           </div>
         )}
 
-        {history.map((item, idx) => (
+        {/* Conversation */}
+        {displayHistory.map((item, idx) => (
           <div key={idx} className="space-y-4 animate-fade-in-up">
             {/* User Question */}
             <div className="flex justify-end">
-              <div className="bg-kid-purple text-white px-6 py-3 rounded-2xl rounded-tr-sm shadow-md max-w-[80%]">
-                <p className="text-lg">{item.question}</p>
-              </div>
+                <div className="bg-kid-purple text-white px-5 py-3 rounded-2xl rounded-tr-sm shadow-md max-w-[85%] text-lg font-medium leading-relaxed">
+                    {item.question}
+                </div>
             </div>
-
-            {/* AI Answer */}
+            
+            {/* Panda Answer */}
             <div className="flex justify-start">
-              <div className="bg-white border border-gray-100 p-5 rounded-2xl rounded-tl-sm shadow-md max-w-[90%] space-y-4">
-                 <div className="flex items-start gap-3">
-                   <div className="text-2xl mt-1">🐼</div>
-                   <div className="space-y-2 w-full">
-                     <p className="text-lg text-gray-800 leading-relaxed">{item.answer}</p>
+              <div className="bg-white border border-gray-100 p-5 rounded-2xl rounded-tl-sm shadow-lg max-w-[95%] space-y-4 w-full">
+                 <div className="flex items-start gap-4">
+                   <div className="text-3xl mt-1 flex-shrink-0">🐼</div>
+                   <div className="space-y-3 w-full min-w-0">
+                     <p className="text-lg text-gray-800 leading-relaxed font-medium">{item.answer}</p>
                      
-                     {/* Inline Image Display */}
                      {item.generatedImage && (
-                        <div className="mt-2 rounded-xl overflow-hidden border border-gray-100 shadow-sm w-full max-w-sm">
-                            <img src={item.generatedImage} alt="Illustration" className="w-full h-auto object-cover" />
-                        </div>
+                         <div className="relative rounded-xl overflow-hidden border border-gray-100 shadow-inner w-full bg-gray-50">
+                             <img src={item.generatedImage} alt="Illustration" className="w-full h-auto object-cover max-h-60" />
+                         </div>
                      )}
-
-                     <div className="flex gap-2 flex-wrap">
-                       <button 
-                         onClick={() => speakAnswer(item.answer)}
-                         className="text-kid-blue text-sm font-bold flex items-center gap-1 hover:bg-blue-50 px-2 py-1 rounded"
-                       >
-                         🔊 朗读
+                     
+                     <div className="flex gap-3 pt-1">
+                       <button onClick={() => speakAnswer(item.answer)} className="bg-blue-50 text-blue-600 px-3 py-1.5 rounded-lg text-sm font-bold flex items-center gap-1 hover:bg-blue-100 transition-colors">
+                           🔊 听一听
                        </button>
-
                        {item.imageUrl && (
-                         <a 
-                           href={`https://image.baidu.com/search/index?tn=baiduimage&word=${encodeURIComponent(item.imageUrl)}`} 
-                           target="_blank" 
-                           rel="noopener noreferrer"
-                           className="text-kid-pink text-sm font-bold flex items-center gap-1 hover:bg-pink-50 px-2 py-1 rounded"
-                         >
-                           🔍 更多图片 ({item.imageUrl})
-                         </a>
+                           <a href={`https://image.baidu.com/search/index?tn=baiduimage&word=${encodeURIComponent(item.imageUrl)}`} target="_blank" rel="noopener noreferrer" className="bg-pink-50 text-pink-600 px-3 py-1.5 rounded-lg text-sm font-bold flex items-center gap-1 hover:bg-pink-100 transition-colors">
+                               🔍 搜图: {item.imageUrl}
+                           </a>
                        )}
                      </div>
                    </div>
@@ -174,47 +170,34 @@ const ScienceView: React.FC<ScienceViewProps> = ({ onUpdateProgress, difficulty,
         ))}
 
         {status === LoadingState.LOADING && (
-          <div className="flex justify-start">
-             <div className="bg-white border border-gray-100 p-4 rounded-2xl shadow-sm">
-                <Loading text={isRecording ? "正在聆听..." : "熊猫教授正在思考(并画画)..."} />
-             </div>
-          </div>
+            <div className="flex justify-start animate-pulse">
+                <div className="bg-white border border-gray-100 p-4 rounded-2xl rounded-tl-sm shadow-sm flex items-center gap-3">
+                    <span className="text-2xl">🐼</span>
+                    <span className="text-gray-500 font-bold">{isRecording ? "正在听你说..." : "熊猫教授正在思考..."}</span>
+                </div>
+            </div>
         )}
       </div>
 
-      {/* Input Area */}
-      <div className="mt-4 flex gap-2 items-center select-none">
-        {/* Voice Button */}
-        <button
-           onClick={startListening}
-           disabled={status === LoadingState.LOADING}
-           className={`
-             h-14 w-14 rounded-full flex items-center justify-center text-2xl shadow-lg border-2 transition-all flex-shrink-0 cursor-pointer
-             ${isRecording 
-               ? 'bg-red-500 border-red-200 text-white animate-pulse' 
-               : 'bg-white text-gray-500 border-gray-100 hover:bg-gray-50'}
-           `}
+      {/* Footer / Controls */}
+      <div className="mt-4 flex flex-col items-center gap-2 select-none pt-2 border-t border-gray-100">
+        <button 
+            onMouseDown={startListening}
+            onTouchStart={(e) => { e.preventDefault(); startListening(); }}
+            onMouseUp={stopListening}
+            onTouchEnd={(e) => { e.preventDefault(); stopListening(); }}
+            onMouseLeave={stopListening}
+            disabled={status === LoadingState.LOADING} 
+            className={`
+                h-20 w-20 rounded-full flex items-center justify-center text-4xl shadow-xl border-4 transition-all cursor-pointer touch-none
+                ${isRecording 
+                    ? 'bg-red-500 border-red-200 text-white animate-pulse scale-110 shadow-red-200' 
+                    : 'bg-gradient-to-b from-kid-green to-green-500 border-green-200 text-white hover:scale-105 active:scale-95 shadow-green-200'}
+            `}
         >
-          {isRecording ? '👂' : '🎙️'}
+            {isRecording ? '👂' : '🎙️'}
         </button>
-
-        <form onSubmit={(e) => { e.preventDefault(); handleAsk(); }} className="flex-1 relative">
-          <input
-            type="text"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="输入问题..."
-            disabled={status === LoadingState.LOADING}
-            className="w-full bg-white h-14 pl-6 pr-14 rounded-full shadow-lg border-2 border-transparent focus:border-kid-blue focus:outline-none text-lg transition-all"
-          />
-          <button
-            type="submit"
-            disabled={!query.trim() || status === LoadingState.LOADING}
-            className="absolute right-1 top-1 h-12 w-12 bg-kid-green hover:bg-green-400 text-white rounded-full flex items-center justify-center shadow-md transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            🚀
-          </button>
-        </form>
+        <p className="text-gray-400 text-xs font-bold">{isRecording ? '松开结束 (Release to Send)' : '按住提问 (Hold to Ask)'}</p>
       </div>
     </div>
   );

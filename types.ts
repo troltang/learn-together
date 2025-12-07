@@ -3,16 +3,23 @@ export enum AppView {
   HOME = 'HOME',
   ENGLISH = 'ENGLISH',
   CHINESE = 'CHINESE',
+  WRITING = 'WRITING',
   SCIENCE = 'SCIENCE',
   GAME = 'GAME',
-  SCENE = 'SCENE', // New Scene Interaction Mode
+  SCENE = 'SCENE',
 }
 
-export enum Difficulty {
-  EASY = 'EASY',     // 3-5 years (Intro)
-  MEDIUM = 'MEDIUM', // 6-8 years (Basic)
-  HARD = 'HARD'      // 9+ years (Advanced)
+export enum LoadingState {
+  IDLE = 'IDLE',
+  LOADING = 'LOADING',
+  SUCCESS = 'SUCCESS',
+  ERROR = 'ERROR',
 }
+
+// Changed from Difficulty to Age
+export type Age = number;
+
+export type VoiceId = 'zh-CN-XiaoyuMultilingualNeural' | 'zh-CN-XiaoxiaoMultilingualNeural' | 'zh-CN-XiaoshuangNeural' | 'RANDOM';
 
 export interface FlashCardText {
   word: string;
@@ -34,7 +41,7 @@ export interface ScienceQA {
 }
 
 export interface EvaluationResult {
-  score: number; // 1 to 3
+  score: number;
   comment: string;
   userPhonetic?: string;
   correctPhonetic?: string;
@@ -42,7 +49,7 @@ export interface EvaluationResult {
 }
 
 export interface HandwritingResult {
-  score: number; // 1 to 3
+  score: number;
   comment: string;
 }
 
@@ -56,41 +63,29 @@ export interface GameScenario {
   successText: string;
   imageUrl?: string;
   imagePrompt: string;
-  // Quiz specific
-  question?: string; // For Quiz mode
-  options?: string[]; // For Quiz mode
-  correctAnswer?: string; // For Quiz mode
+  question?: string; 
+  options?: string[]; 
+  correctAnswer?: string; 
 }
 
 export interface SceneInteraction {
-  sceneName: string; // e.g., "At the Supermarket"
-  characterName: string; // e.g., "Mimi the Cat"
+  sceneName: string;
+  characterName: string;
   characterAvatarPrompt: string;
   bgPrompt: string;
-  openingLine: string; // AI's first spoken line
-}
-
-export interface SceneTurn {
-  aiText: string;
-  userText: string;
-}
-
-export enum LoadingState {
-  IDLE = 'IDLE',
-  LOADING = 'LOADING',
-  SUCCESS = 'SUCCESS',
-  ERROR = 'ERROR',
+  openingLine: string;
 }
 
 export interface ModuleProgress {
-  xp: number;       // Total experience points
-  level: number;    // Current level (e.g., floor(xp / 100) + 1)
-  items: number;    // Number of words/questions mastered or interacted with
+  xp: number;       
+  level: number;    
+  items: number;    
 }
 
 export interface UserProgress {
   [AppView.ENGLISH]: ModuleProgress;
   [AppView.CHINESE]: ModuleProgress;
+  [AppView.WRITING]: ModuleProgress;
   [AppView.SCIENCE]: ModuleProgress;
   [AppView.GAME]: ModuleProgress;
   [AppView.SCENE]: ModuleProgress;
@@ -98,13 +93,9 @@ export interface UserProgress {
 
 export interface HistoryItem {
   id: string;
-  type: 'FLASHCARD' | 'SCIENCE';
+  type: 'FLASHCARD' | 'SCIENCE' | 'WRITING';
   timestamp: number;
-  data: FlashCard | ScienceQA;
-  mode?: AppView; // For FlashCards (ENGLISH vs CHINESE)
-  preview: string; // The title/word/question to display
-}
-
-export interface AppState {
-  score: number;
+  data: FlashCard | ScienceQA | { char: string, type: string };
+  mode?: AppView; 
+  preview: string;
 }

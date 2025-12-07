@@ -7,13 +7,15 @@ import FlashCardView from './views/FlashCardView';
 import ScienceView from './views/ScienceView';
 import GameView from './views/GameView';
 import SceneView from './views/SceneView';
-import { AppView, UserProgress, ModuleProgress, Difficulty, HistoryItem, FlashCard, ScienceQA } from './types';
+import WritingView from './views/WritingView';
+import { AppView, UserProgress, ModuleProgress, Age, HistoryItem, FlashCard, ScienceQA, VoiceId } from './types';
 
 const INITIAL_MODULE_STATE: ModuleProgress = { xp: 0, level: 1, items: 0 };
 
 const INITIAL_PROGRESS: UserProgress = {
   [AppView.ENGLISH]: { ...INITIAL_MODULE_STATE },
   [AppView.CHINESE]: { ...INITIAL_MODULE_STATE },
+  [AppView.WRITING]: { ...INITIAL_MODULE_STATE },
   [AppView.SCIENCE]: { ...INITIAL_MODULE_STATE },
   [AppView.GAME]: { ...INITIAL_MODULE_STATE },
   [AppView.SCENE]: { ...INITIAL_MODULE_STATE },
@@ -24,25 +26,22 @@ const XP_PER_LEVEL = 100;
 const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<AppView>(AppView.HOME);
   const [progress, setProgress] = useState<UserProgress>(INITIAL_PROGRESS);
-  const [difficulty, setDifficulty] = useState<Difficulty>(Difficulty.EASY);
+  const [age, setAge] = useState<Age>(5); // Default Age 5
+  const [voiceId, setVoiceId] = useState<VoiceId>('RANDOM');
   
-  // History State
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   
-  // Restoration State
   const [initialFlashCard, setInitialFlashCard] = useState<FlashCard | undefined>(undefined);
   const [initialScienceQA, setInitialScienceQA] = useState<ScienceQA | undefined>(undefined);
   const [viewKey, setViewKey] = useState(0);
 
-  // Load from LocalStorage
   useEffect(() => {
     const savedProgress = localStorage.getItem('kid_app_progress');
     if (savedProgress) {
       try {
         const parsed = JSON.parse(savedProgress);
-        if (!parsed[AppView.GAME]) parsed[AppView.GAME] = { ...INITIAL_MODULE_STATE };
-        if (!parsed[AppView.SCENE]) parsed[AppView.SCENE] = { ...INITIAL_MODULE_STATE };
+        if (!parsed[AppView.WRITING]) parsed[AppView.WRITING] = { ...INITIAL_MODULE_STATE };
         setProgress(prev => ({ ...prev, ...parsed }));
       } catch (e) { console.error("Failed to load progress", e); }
     }
@@ -63,7 +62,6 @@ const App: React.FC = () => {
     localStorage.setItem('kid_app_history', JSON.stringify(history));
   }, [history]);
 
-  // Fix: Explicitly type 'view' to be a key of UserProgress (excluding HOME)
   const handleUpdateProgress = (view: keyof UserProgress, xpDelta: number, itemsDelta: number = 0) => {
     setProgress(prev => {
       const currentModule = prev[view] || { ...INITIAL_MODULE_STATE };
@@ -87,7 +85,7 @@ const App: React.FC = () => {
       id: Date.now().toString() + Math.random().toString().slice(2, 6),
       timestamp: Date.now()
     };
-    setHistory(prev => [newItem, ...prev].slice(0, 50));
+    setHistory(prev => [newItem, ...prev].slice(0, 100));
   };
 
   const handleRestoreHistory = (item: HistoryItem) => {
@@ -112,7 +110,7 @@ const App: React.FC = () => {
     setCurrentView(view);
   };
 
-  const totalScore = Object.values(progress).reduce((acc, curr) => acc + ((curr as ModuleProgress)?.xp || 0), 0);
+  const totalScore = Object.values(progress).reduce((acc: number, curr) => acc + ((curr as ModuleProgress)?.xp || 0), 0);
 
   const renderContent = () => {
     switch (currentView) {
@@ -123,7 +121,8 @@ const App: React.FC = () => {
           <FlashCardView 
             key={`english-${viewKey}`}
             mode={AppView.ENGLISH} 
-            difficulty={difficulty}
+            difficulty={age}
+            voiceId={voiceId}
             onUpdateProgress={(xp, items) => handleUpdateProgress(AppView.ENGLISH, xp, items)}
             initialData={initialFlashCard}
             onAddToHistory={(data) => handleAddToHistory({ type: 'FLASHCARD', mode: AppView.ENGLISH, data, preview: data.word })}
@@ -135,18 +134,30 @@ const App: React.FC = () => {
           <FlashCardView 
             key={`chinese-${viewKey}`}
             mode={AppView.CHINESE} 
-            difficulty={difficulty}
+            difficulty={age}
+            voiceId={voiceId}
             onUpdateProgress={(xp, items) => handleUpdateProgress(AppView.CHINESE, xp, items)}
             initialData={initialFlashCard}
             onAddToHistory={(data) => handleAddToHistory({ type: 'FLASHCARD', mode: AppView.CHINESE, data, preview: data.word })}
             history={history}
           />
         );
+      case AppView.WRITING:
+        return (
+          <WritingView 
+            key={`writing-${viewKey}`}
+            difficulty={age}
+            voiceId={voiceId}
+            onUpdateProgress={(xp, items) => handleUpdateProgress(AppView.WRITING, xp, items)}
+            onAddToHistory={(data) => handleAddToHistory({ type: 'WRITING', data, preview: data.char })}
+          />
+        );
       case AppView.SCIENCE:
         return (
           <ScienceView 
             key={`science-${viewKey}`}
-            difficulty={difficulty}
+            difficulty={age}
+            voiceId={voiceId}
             onUpdateProgress={(xp, items) => handleUpdateProgress(AppView.SCIENCE, xp, items)}
             initialData={initialScienceQA}
             onAddToHistory={(data) => handleAddToHistory({ type: 'SCIENCE', data, preview: data.question })}
@@ -157,6 +168,8 @@ const App: React.FC = () => {
           <GameView
             key={`game-${viewKey}`}
             history={history}
+            difficulty={age}
+            voiceId={voiceId}
             onUpdateProgress={(xp, items) => handleUpdateProgress(AppView.GAME, xp, items)}
             onNavigate={handleNavigate}
           />
@@ -165,6 +178,7 @@ const App: React.FC = () => {
         return (
           <SceneView
             key={`scene-${viewKey}`}
+            voiceId={voiceId}
             onUpdateProgress={(xp, items) => handleUpdateProgress(AppView.SCENE, xp, items)}
           />
         );
@@ -179,8 +193,10 @@ const App: React.FC = () => {
         currentView={currentView} 
         onNavigate={handleNavigate} 
         score={totalScore}
-        difficulty={difficulty}
-        onSetDifficulty={setDifficulty}
+        age={age}
+        onSetAge={setAge}
+        voiceId={voiceId}
+        onSetVoiceId={setVoiceId}
         onOpenHistory={() => setIsHistoryOpen(true)}
       >
         {renderContent()}
