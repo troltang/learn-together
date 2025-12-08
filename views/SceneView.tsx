@@ -112,6 +112,7 @@ const SceneView: React.FC<SceneViewProps> = ({ onUpdateProgress, voiceId }) => {
         (err) => {
             console.error(err);
             setIsRecording(false);
+            setLastAiMessage(err); // Show error in bubble
         }
     );
   };

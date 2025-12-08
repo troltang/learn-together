@@ -91,7 +91,15 @@ const ScienceView: React.FC<ScienceViewProps> = ({ onUpdateProgress, difficulty:
   const startListening = () => {
     if (isRecording) return;
     setIsRecording(true);
-    recognitionRef.current = startSpeechRecognition('zh', (text) => { handleAsk(text); }, () => setIsRecording(false), (err) => { alert(err); setIsRecording(false); });
+    recognitionRef.current = startSpeechRecognition(
+        'zh', 
+        (text) => { handleAsk(text); }, 
+        () => setIsRecording(false), 
+        (err) => { 
+            setIsRecording(false);
+            speakText(err, voiceId);
+        }
+    );
   };
 
   const stopListening = () => {

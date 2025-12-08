@@ -12,6 +12,9 @@ const pendingRequests = new Map<string, Promise<string>>();
 // Mutable Token
 let TTS_TOKEN = 'a72250317ca2ff2d27f01dabbef32ac3'; 
 
+// Singleton for SpeechRecognition to prevent overlaps
+let currentRecognition: any = null;
+
 // Convert Blob to Base64 (for writing pad)
 export function blobToBase64(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -236,7 +239,7 @@ const speakNative = (text: string): Promise<void> => {
 
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = 'zh-CN'; 
-    utterance.rate = 0.5; // Set to 0.8x speed as requested
+    utterance.rate = 0.8; 
     
     const voices = window.speechSynthesis.getVoices();
     const preferredVoice = voices.find(v => 
@@ -316,24 +319,69 @@ export const startSpeechRecognition = (
     return null;
   }
 
+  // Stop any existing instance to prevent conflict errors
+  if (currentRecognition) {
+    try {
+        currentRecognition.onend = null; // Prevent callbacks from old instance
+        currentRecognition.onerror = null;
+        currentRecognition.stop();
+        currentRecognition.abort();
+    } catch(e) {}
+    currentRecognition = null;
+  }
+
   const recognition = new SpeechRecognition();
+  currentRecognition = recognition;
+
   recognition.lang = lang === 'en' ? 'en-US' : 'zh-CN';
   recognition.continuous = false;
   recognition.interimResults = false;
 
+  let hasResult = false;
+
   recognition.onresult = (event: any) => {
     if (event.results.length > 0) {
+      hasResult = true;
       const transcript = event.results[0][0].transcript;
       onResult(transcript);
     }
   };
 
-  recognition.onend = () => { onEnd(); };
-  recognition.onerror = (event: any) => {
-    if (event.error !== 'no-speech') {
-      console.warn("Speech recognition error:", event.error);
-      onError("语音识别出错");
+  recognition.onend = () => {
+    if (currentRecognition === recognition) {
+        currentRecognition = null;
     }
+    if (!hasResult) {
+        // Handle case where recognition ends without result (silence)
+        // We can treat this as an error or just a clean end
+        // onError("没听到声音"); 
+    }
+    onEnd(); 
+  };
+
+  recognition.onerror = (event: any) => {
+    if (currentRecognition === recognition) {
+        currentRecognition = null;
+    }
+    
+    // Ignore 'aborted' as it happens when we stop manually
+    if (event.error === 'aborted') {
+        onEnd();
+        return;
+    }
+
+    // Map errors to friendly messages
+    let msg = "语音识别出错";
+    if (event.error === 'no-speech') {
+        msg = "没听到声音，请大声一点";
+    } else if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+        msg = "请允许麦克风权限";
+    } else if (event.error === 'network') {
+        msg = "网络连接不稳定";
+    }
+
+    console.warn("Speech recognition error:", event.error);
+    onError(msg);
     onEnd();
   };
 
@@ -342,7 +390,7 @@ export const startSpeechRecognition = (
     return recognition;
   } catch (e) {
     console.error(e);
-    onError("无法启动录音");
+    onError("无法启动录音，请刷新页面重试");
     return null;
   }
 };

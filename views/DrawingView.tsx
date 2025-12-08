@@ -188,7 +188,10 @@ const DrawingView: React.FC<DrawingViewProps> = ({ difficulty: age, voiceId, onU
           if(text.endsWith("画")) keyword = text.substring(0, text.length-1);
           
           if(keyword) loadNewDrawing(keyword);
-      }, () => setIsRecording(false), (err) => { setIsRecording(false); });
+      }, () => setIsRecording(false), (err) => { 
+          setIsRecording(false); 
+          speakText(err, sessionVoice);
+      });
   };
 
   const stopVoice = () => {

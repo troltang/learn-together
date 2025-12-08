@@ -350,7 +350,16 @@ const FlashCardView: React.FC<FlashCardViewProps> = ({ mode, difficulty: age, vo
     setEvaluation(null);
     setIsRecording(true);
     const lang = mode === AppView.ENGLISH ? 'en' : 'zh';
-    recognitionRef.current = startSpeechRecognition(lang, (text) => { setIsRecording(false); handleEvaluation(text); }, () => setIsRecording(false), (err) => { console.error(err); setIsRecording(false); });
+    recognitionRef.current = startSpeechRecognition(
+        lang, 
+        (text) => { setIsRecording(false); handleEvaluation(text); }, 
+        () => setIsRecording(false), 
+        (err) => { 
+            console.error(err); 
+            setIsRecording(false);
+            speakText(err, effectiveVoice);
+        }
+    );
   };
 
   const stopRecording = () => {

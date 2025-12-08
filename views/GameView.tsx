@@ -163,7 +163,7 @@ const GameView: React.FC<GameViewProps> = ({ history, difficulty: age, voiceId, 
         },
         () => setIsRecording(false),
         (err) => {
-            setFeedback("出错了，点击重试");
+            setFeedback(err);
             setIsRecording(false);
         }
     );
