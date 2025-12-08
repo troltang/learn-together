@@ -325,7 +325,7 @@ export const startSpeechRecognition = (
         currentRecognition.onend = null; // Prevent callbacks from old instance
         currentRecognition.onerror = null;
         currentRecognition.stop();
-        currentRecognition.abort();
+        // Do not abort here, as it might kill a pending result processing
     } catch(e) {}
     currentRecognition = null;
   }
@@ -335,26 +335,39 @@ export const startSpeechRecognition = (
 
   recognition.lang = lang === 'en' ? 'en-US' : 'zh-CN';
   recognition.continuous = false;
-  recognition.interimResults = false;
+  // CRITICAL: Set interimResults to true. 
+  // On Mobile Safari/Android, stopping the recognition manually often causes it to close 
+  // without firing a 'final' result event if capturing was short. 
+  // We must capture interim results and use the last one if available.
+  recognition.interimResults = true;
 
-  let hasResult = false;
+  let finalTranscript = '';
+  let interimTranscript = '';
+  let hasReturnedResult = false;
 
   recognition.onresult = (event: any) => {
-    if (event.results.length > 0) {
-      hasResult = true;
-      const transcript = event.results[0][0].transcript;
-      onResult(transcript);
+    let currentInterim = '';
+    for (let i = event.resultIndex; i < event.results.length; ++i) {
+      if (event.results[i].isFinal) {
+        finalTranscript += event.results[i][0].transcript;
+      } else {
+        currentInterim += event.results[i][0].transcript;
+      }
     }
+    interimTranscript = currentInterim;
   };
 
   recognition.onend = () => {
     if (currentRecognition === recognition) {
         currentRecognition = null;
     }
-    if (!hasResult) {
-        // Handle case where recognition ends without result (silence)
-        // We can treat this as an error or just a clean end
-        // onError("没听到声音"); 
+    
+    if (!hasReturnedResult) {
+        const fullText = (finalTranscript + interimTranscript).trim();
+        if (fullText) {
+            hasReturnedResult = true;
+            onResult(fullText);
+        }
     }
     onEnd(); 
   };
@@ -366,7 +379,6 @@ export const startSpeechRecognition = (
     
     // Ignore 'aborted' as it happens when we stop manually
     if (event.error === 'aborted') {
-        onEnd();
         return;
     }
 
@@ -380,9 +392,13 @@ export const startSpeechRecognition = (
         msg = "网络连接不稳定";
     }
 
-    console.warn("Speech recognition error:", event.error);
-    onError(msg);
-    onEnd();
+    // Only report error if we haven't successfully captured text.
+    // Sometimes 'no-speech' fires after capturing text in some browsers.
+    if (!hasReturnedResult && !finalTranscript && !interimTranscript) {
+        console.warn("Speech recognition error:", event.error);
+        onError(msg);
+    }
+    // onend will fire after onerror
   };
 
   try {
