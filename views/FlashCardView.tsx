@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { AppView, FlashCard, LoadingState, EvaluationResult, Age, HandwritingResult, HistoryItem, FlashCardText, VoiceId } from '../types';
 import * as GeminiService from '../services/geminiService';
-import { cancelAudio, startSpeechRecognition, speakText, playCombinedAudio, preloadAudio, clearAudioCache } from '../utils/audioUtils';
+import { cancelAudio, startSpeechRecognition, speakText, playSequence, preloadAudio, clearAudioCache, AVAILABLE_VOICES } from '../utils/audioUtils';
 import { preloadImage } from '../utils/imageUtils';
 import Loading from '../components/Loading';
 import WritingPad from '../components/WritingPad';
@@ -25,6 +25,25 @@ const TOPICS = {
 
 const ALPHABET = Array.from({ length: 26 }, (_, i) => String.fromCharCode(65 + i));
 
+// --- Simulated Waveform Component ---
+const RecordingWaveform = () => {
+  return (
+    <div className="flex items-center gap-1 h-8 justify-center">
+      {[1, 2, 3, 4, 5, 4, 3, 2].map((i) => (
+        <div 
+          key={i} 
+          className="w-1.5 bg-red-400 rounded-full animate-bounce"
+          style={{ 
+            height: `${i * 6}px`, 
+            animationDuration: '0.6s',
+            animationDelay: `${i * 0.05}s` 
+          }}
+        ></div>
+      ))}
+    </div>
+  );
+};
+
 const FlashCardView: React.FC<FlashCardViewProps> = ({ mode, difficulty: age, voiceId, onUpdateProgress, initialData, onAddToHistory, history }) => {
   const [card, setCard] = useState<FlashCard | null>(null);
   const [textStatus, setTextStatus] = useState<LoadingState>(LoadingState.IDLE);
@@ -34,6 +53,7 @@ const FlashCardView: React.FC<FlashCardViewProps> = ({ mode, difficulty: age, vo
   // History & Nav
   const [localHistory, setLocalHistory] = useState<FlashCard[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
+  // Keep last 100 words to prevent dupes
   const [previousWords, setPreviousWords] = useState<string[]>([]);
   
   // BATCH QUEUE
@@ -61,6 +81,8 @@ const FlashCardView: React.FC<FlashCardViewProps> = ({ mode, difficulty: age, vo
   const hanziContainerRef = useRef<HTMLDivElement>(null);
   const writerRef = useRef<any>(null);
   const initializedRef = useRef(false);
+
+  const effectiveVoice = (voiceId === 'RANDOM' && card?.assignedVoice) ? card.assignedVoice : voiceId;
 
   // Cleanup audio on unmount
   useEffect(() => {
@@ -117,13 +139,14 @@ const FlashCardView: React.FC<FlashCardViewProps> = ({ mode, difficulty: age, vo
     const fetchTask = async () => {
       try {
         const lang = mode === AppView.ENGLISH ? 'en' : 'zh';
-        // Pass accumulated history to exclude list (up to 200 to keep prompt reasonable)
-        const exclude = [...previousWords].slice(0, 200);
-        // Fetch large batch (e.g. 50) text only
+        // Pass a large history buffer
+        const exclude = [...previousWords].slice(0, 100); 
         const batchTexts = await GeminiService.generateCardBatch(selectedTopic, lang, age, exclude);
         
-        // Map to FlashCard objects (image not yet loaded)
-        const newCards = batchTexts.map(text => ({ ...text, imageUrl: undefined }));
+        const newCards: FlashCard[] = batchTexts.map(text => {
+            const assignedVoice = AVAILABLE_VOICES[Math.floor(Math.random() * AVAILABLE_VOICES.length)] as VoiceId;
+            return { ...text, imageUrl: undefined, assignedVoice };
+        });
         
         setCardQueue(prev => [...prev, ...newCards]);
         return newCards;
@@ -145,12 +168,8 @@ const FlashCardView: React.FC<FlashCardViewProps> = ({ mode, difficulty: age, vo
       if (cardToLoad.imageUrl) return cardToLoad;
       try {
           const url = await GeminiService.generateImageForCard(cardToLoad.imagePrompt);
-          // Update the card object
           const updatedCard = { ...cardToLoad, imageUrl: url };
-          
-          // Also update it in the queue if it's there
           setCardQueue(prev => prev.map(c => c.word === cardToLoad.word ? updatedCard : c));
-          
           return updatedCard;
       } catch (e) {
           console.error("Failed to load image for", cardToLoad.word);
@@ -158,12 +177,10 @@ const FlashCardView: React.FC<FlashCardViewProps> = ({ mode, difficulty: age, vo
       }
   };
 
-  const preloadResources = () => {
-      // Look ahead at the next card in queue
+  // Preload next card's resources
+  useEffect(() => {
       if (cardQueue.length > 0) {
-          const next = cardQueue[0]; // The one coming up next
-          
-          // 1. Preload Image
+          const next = cardQueue[0];
           if (!next.imageUrl) {
               ensureImage(next).then(updated => {
                   if(updated.imageUrl) preloadImage(updated.imageUrl);
@@ -171,12 +188,14 @@ const FlashCardView: React.FC<FlashCardViewProps> = ({ mode, difficulty: age, vo
           } else {
               preloadImage(next.imageUrl);
           }
-
-          // 2. Preload Audio
-          const combinedText = `${next.word}。${next.translation}。${next.sentence}`;
-          preloadAudio(combinedText, voiceId);
+          
+          const nextVoice = (voiceId === 'RANDOM' && next.assignedVoice) ? next.assignedVoice : voiceId;
+          
+          preloadAudio(next.word, nextVoice);
+          preloadAudio(next.translation, nextVoice);
+          preloadAudio(next.sentence, nextVoice);
       }
-  };
+  }, [card, cardQueue.length, voiceId]);
 
   const performTransitionLoad = (loadFn: () => void) => {
     cancelAudio();
@@ -198,7 +217,6 @@ const FlashCardView: React.FC<FlashCardViewProps> = ({ mode, difficulty: age, vo
       if (reviewable.length > 0) {
         const randomItem = reviewable[Math.floor(Math.random() * reviewable.length)];
         const reviewCard = randomItem.data as FlashCard;
-        // Ensure image for review card if needed (usually cached but check)
         if (!reviewCard.imageUrl) {
              reviewCard.imageUrl = await GeminiService.generateImageForCard(reviewCard.imagePrompt);
         }
@@ -213,22 +231,16 @@ const FlashCardView: React.FC<FlashCardViewProps> = ({ mode, difficulty: age, vo
       }
     }
 
-    // Check Queue
     if (cardQueue.length > 0) {
         const nextCardRaw = cardQueue[0];
-        setCardQueue(prev => prev.slice(1)); // Pop
-        
-        // If queue is getting low, fetch more in background
+        setCardQueue(prev => prev.slice(1)); 
         if (cardQueue.length <= 10 && !isFetchingBatch.current) {
             fetchBatch();
         }
-        
         const readyCard = await ensureImage(nextCardRaw);
         displayNewCard(readyCard);
     } else {
-        // Queue empty
         const newCards = await fetchBatch();
-        
         if (newCards.length > 0) {
             const nextCardRaw = newCards[0];
             setCardQueue(prev => prev.slice(1));
@@ -246,18 +258,15 @@ const FlashCardView: React.FC<FlashCardViewProps> = ({ mode, difficulty: age, vo
       onAddToHistory(newCard);
       setLocalHistory(prev => [...prev, newCard]);
       setHistoryIndex(prev => prev + 1);
-      setPreviousWords(prev => [newCard.word, ...prev]); 
-      
-      preloadResources();
-
+      setPreviousWords(prev => [newCard.word, ...prev].slice(0, 200)); 
       setTimeout(() => handlePlaySequence(newCard), 600);
   };
 
   const handlePlaySequence = (currentCard: FlashCard) => {
     if (!currentCard) return;
-    // Construct single string for API
-    const combinedText = `${currentCard.word}。${currentCard.translation}。${currentCard.sentence}`;
-    playCombinedAudio(combinedText, voiceId);
+    const texts = [currentCard.word, currentCard.translation, currentCard.sentence];
+    const v = (voiceId === 'RANDOM' && currentCard.assignedVoice) ? currentCard.assignedVoice : voiceId;
+    playSequence(texts, v);
   };
 
   // --- Navigation ---
@@ -335,7 +344,6 @@ const FlashCardView: React.FC<FlashCardViewProps> = ({ mode, difficulty: age, vo
     }
   }, [selectedTopic, age]);
 
-  // Push to Talk Logic
   const startRecording = () => {
     if (isRecording) return;
     cancelAudio();
@@ -358,7 +366,6 @@ const FlashCardView: React.FC<FlashCardViewProps> = ({ mode, difficulty: age, vo
       const result = await GeminiService.evaluatePronunciation(card.word, spokenText, lang);
       setEvaluation(result);
       
-      // Play audio feedback
       if (result.comment) {
           let feedbackText = result.comment;
           if (result.score === 3) {
@@ -367,7 +374,7 @@ const FlashCardView: React.FC<FlashCardViewProps> = ({ mode, difficulty: age, vo
           } else if (result.score === 1) {
               feedbackText = "没关系，" + feedbackText;
           }
-          speakText(feedbackText, voiceId);
+          speakText(feedbackText, effectiveVoice);
       }
 
       if (result.score >= 2) { 
@@ -382,13 +389,11 @@ const FlashCardView: React.FC<FlashCardViewProps> = ({ mode, difficulty: age, vo
     setIsGradingWriting(true);
     try {
         const isChinese = mode === AppView.CHINESE;
-        // In Letter Practice, grade the Letter. In Card mode, grade the Word (or first char of Chinese word)
         const target = isLetterPractice ? selectedTopic : (isChinese ? card!.word[0] : card!.word);
         
         const result = await GeminiService.gradeHandwriting(target, base64, isChinese);
         setHandwritingResult(result);
         
-        // Play audio feedback
         if (result.comment) {
             let feedbackText = result.comment;
             if (result.score === 3) {
@@ -397,7 +402,7 @@ const FlashCardView: React.FC<FlashCardViewProps> = ({ mode, difficulty: age, vo
             } else if (result.score === 1) {
                 feedbackText = "加油，" + feedbackText;
             }
-            speakText(feedbackText, voiceId);
+            speakText(feedbackText, effectiveVoice);
         }
 
         if (result.score >= 2) { 
@@ -407,7 +412,6 @@ const FlashCardView: React.FC<FlashCardViewProps> = ({ mode, difficulty: age, vo
     } finally { setIsGradingWriting(false); }
   };
 
-  // Alphabet Navigation Helpers
   const switchLetter = (delta: number) => {
       const idx = ALPHABET.indexOf(selectedTopic);
       if (idx === -1) return;
@@ -465,14 +469,13 @@ const FlashCardView: React.FC<FlashCardViewProps> = ({ mode, difficulty: age, vo
       )}
 
       {isLetterPractice ? (
-          // --- LETTER PRACTICE MODE ---
           <div className="bg-white rounded-3xl shadow-xl overflow-hidden flex flex-col relative border-2 border-gray-100 min-h-[500px] p-6 items-center justify-center space-y-6 animate-fade-in">
               <button onClick={() => switchLetter(-1)} className="absolute left-2 top-1/2 -translate-y-1/2 w-10 h-10 bg-white border border-gray-200 rounded-full shadow-md z-30 flex items-center justify-center text-gray-600 hover:bg-gray-50 transition-colors">◀</button>
               <button onClick={() => switchLetter(1)} className="absolute right-2 top-1/2 -translate-y-1/2 w-10 h-10 bg-white border border-gray-200 rounded-full shadow-md z-30 flex items-center justify-center text-gray-600 hover:bg-gray-50 transition-colors">▶</button>
 
               <div className="text-center">
                   <h2 className="text-8xl font-black text-gray-800 font-sans tracking-wider mb-2">{selectedTopic} <span className="text-6xl text-gray-400 font-normal">{selectedTopic.toLowerCase()}</span></h2>
-                  <button onClick={() => speakText(selectedTopic, voiceId)} className="mt-2 w-12 h-12 rounded-full bg-pink-100 text-pink-600 flex items-center justify-center text-2xl shadow-sm hover:scale-110 transition-transform">🔊</button>
+                  <button onClick={() => speakText(selectedTopic, effectiveVoice)} className="mt-2 w-12 h-12 rounded-full bg-pink-100 text-pink-600 flex items-center justify-center text-2xl shadow-sm hover:scale-110 transition-transform">🔊</button>
               </div>
               <WritingPad target={selectedTopic} isChinese={false} onGrade={handleGradeWriting} isGrading={isGradingWriting} strokeGuideUrl={null} />
               
@@ -485,7 +488,6 @@ const FlashCardView: React.FC<FlashCardViewProps> = ({ mode, difficulty: age, vo
               )}
           </div>
       ) : (
-          // --- NORMAL CARD MODE ---
           <div 
             className="bg-white rounded-3xl shadow-xl overflow-hidden flex flex-col relative border-2 border-gray-100 min-h-[500px] select-none touch-pan-y"
             onMouseDown={(e) => handleStart(e.clientX)}
@@ -527,31 +529,33 @@ const FlashCardView: React.FC<FlashCardViewProps> = ({ mode, difficulty: age, vo
                         </div>
 
                         <div className="p-4 flex flex-col items-center justify-center text-center space-y-4 flex-1">
-                            <div className="flex flex-row items-baseline justify-center gap-4 flex-wrap">
+                            {/* Word & Translation Area - Added dedicated Speaker Buttons */}
+                            <div className="flex flex-row items-center justify-center gap-2 flex-wrap">
                                 <h2 className="text-5xl font-black text-gray-800 tracking-wide font-sans">{card.word}</h2>
-                                {card.pinyin && <p className="text-gray-400 font-mono text-lg -mt-2">[{card.pinyin}]</p>}
+                                <button onClick={() => speakText(card.word, effectiveVoice)} className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 hover:scale-110 transition-transform text-sm">🔊</button>
+                                
+                                {card.pinyin && <p className="text-gray-400 font-mono text-lg -mt-2 mx-2">[{card.pinyin}]</p>}
+                                
                                 <span className="text-3xl text-pink-500 font-bold font-sans">{card.translation}</span>
+                                <button onClick={() => speakText(card.translation, effectiveVoice)} className="w-8 h-8 bg-pink-100 rounded-full flex items-center justify-center text-pink-600 hover:scale-110 transition-transform text-sm">🔊</button>
+                                
                                 {mode === AppView.CHINESE && (
                                     <div ref={hanziContainerRef} className="w-12 h-12 bg-white border border-kid-green rounded shadow-sm inline-block align-middle ml-2"></div>
                                 )}
                             </div>
                             
 
-                            <div 
-                            className="bg-yellow-50/80 rounded-xl p-4 border border-yellow-100 w-full max-w-sm relative cursor-pointer hover:bg-yellow-100 transition-colors"
-                            onClick={() => speakText(card.sentence, voiceId)}
-                            >
-                                <div className="flex items-start gap-2">
-                                    <div className="flex-1 text-left">
-                                        <p className="text-gray-800 font-medium text-lg leading-snug font-sans">{card.sentence}</p>
-                                        <p className="text-gray-500 text-sm mt-1">{card.sentenceTranslation}</p>
-                                    </div>
+                            <div className="bg-yellow-50/80 rounded-xl p-4 border border-yellow-100 w-full max-w-sm relative hover:bg-yellow-100 transition-colors flex items-center gap-3">
+                                <div className="flex-1 text-left">
+                                    <p className="text-gray-800 font-medium text-lg leading-snug font-sans">{card.sentence}</p>
+                                    <p className="text-gray-500 text-sm mt-1">{card.sentenceTranslation}</p>
                                 </div>
+                                <button onClick={() => speakText(card.sentence, effectiveVoice)} className="w-10 h-10 bg-yellow-200 rounded-full flex items-center justify-center text-yellow-700 hover:scale-110 transition-transform flex-shrink-0">🔊</button>
                             </div>
 
                             <div className="flex items-center gap-6 mt-2">
-                                <button onClick={() => handlePlaySequence(card)} className="w-16 h-16 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-3xl shadow-lg hover:bg-blue-200 hover:scale-105 active:scale-95 transition-all animate-breathe">
-                                    🔊
+                                <button onClick={() => handlePlaySequence(card)} className="w-16 h-16 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-3xl shadow-lg hover:bg-blue-200 hover:scale-105 active:scale-95 transition-all animate-breathe" title="播放全部">
+                                    ▶️
                                 </button>
                                 {!evaluation && !evaluating && (
                                     <button 
@@ -565,18 +569,52 @@ const FlashCardView: React.FC<FlashCardViewProps> = ({ mode, difficulty: age, vo
                                                 ? 'bg-red-500 text-white animate-pulse ring-4 ring-red-200 scale-95' 
                                                 : 'bg-green-100 text-green-600 hover:bg-green-200'}`}
                                     >
-                                        {isRecording ? '🎙️' : '🎙️'}
+                                        {isRecording ? <RecordingWaveform /> : '🎙️'}
                                     </button>
                                 )}
                             </div>
-                            {isRecording && <p className="text-xs text-gray-400 animate-pulse">按住说话，松开结束</p>}
+                            {isRecording && <p className="text-xs text-gray-400 font-bold">正在聆听...</p>}
 
-                            {evaluating && <div className="text-blue-500 font-bold animate-pulse">👂 正在打分...</div>}
+                            {evaluating && <div className="text-blue-500 font-bold animate-pulse">👂 正在分析发音...</div>}
+                            
                             {evaluation && (
-                                <div className="w-full max-w-xs bg-white border-2 border-yellow-300 rounded-xl p-2 shadow-sm animate-fade-in relative">
-                                    <button onClick={() => setEvaluation(null)} className="absolute top-1 right-2 text-gray-300">✕</button>
-                                    <div className="flex justify-center text-xl">{[1, 2, 3].map(s => <span key={s} className={s <= evaluation.score ? "" : "grayscale opacity-30"}>⭐</span>)}</div>
-                                    <p className="font-bold text-gray-700 text-sm">{evaluation.comment}</p>
+                                <div className="w-full max-w-sm bg-white border-2 border-yellow-300 rounded-2xl p-4 shadow-xl animate-fade-in relative flex flex-col gap-2">
+                                    <button onClick={() => setEvaluation(null)} className="absolute top-2 right-3 text-gray-300 hover:text-gray-500 font-bold">✕</button>
+                                    
+                                    {/* Score */}
+                                    <div className="flex justify-center text-3xl mb-1">
+                                        {[1, 2, 3].map(s => <span key={s} className={s <= evaluation.score ? "" : "grayscale opacity-30"}>⭐</span>)}
+                                    </div>
+                                    
+                                    {/* Phonetic Breakdown Visualization */}
+                                    {evaluation.breakdown && (
+                                        <div className="flex justify-center gap-2 my-2 flex-wrap">
+                                            {evaluation.breakdown.map((part, idx) => (
+                                                <div key={idx} className="flex flex-col items-center">
+                                                    <div className={`
+                                                        px-3 py-1 rounded-lg text-lg font-black border-b-4
+                                                        ${part.status === 'correct' 
+                                                            ? 'bg-green-100 text-green-700 border-green-300' 
+                                                            : 'bg-red-100 text-red-600 border-red-300'}
+                                                    `}>
+                                                        {part.text}
+                                                    </div>
+                                                    {part.pinyinOrIpa && (
+                                                        <span className="text-[10px] text-gray-400 font-mono mt-1">{part.pinyinOrIpa}</span>
+                                                    )}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+
+                                    <p className="font-bold text-gray-700 text-center">{evaluation.comment}</p>
+                                    
+                                    {evaluation.userPhonetic && evaluation.correctPhonetic && !evaluation.breakdown && (
+                                        <div className="text-xs text-gray-400 flex justify-between px-4 mt-2 bg-gray-50 py-2 rounded-lg">
+                                            <span>听到了: /{evaluation.userPhonetic}/</span>
+                                            <span>目标: /{evaluation.correctPhonetic}/</span>
+                                        </div>
+                                    )}
                                 </div>
                             )}
                         </div>

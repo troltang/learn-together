@@ -29,7 +29,7 @@ const Layout: React.FC<LayoutProps> = ({
     <div className="min-h-screen flex flex-col font-sans text-gray-800">
       {/* Header */}
       <header className="bg-white/90 backdrop-blur-md sticky top-0 z-50 shadow-sm border-b border-gray-100 transition-all">
-        <div className="max-w-4xl mx-auto px-4 h-16 flex items-center justify-between gap-2">
+        <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between gap-2">
           {/* Logo */}
           <div 
             className="flex items-center gap-2 cursor-pointer hover:scale-105 transition-transform flex-shrink-0" 
@@ -105,7 +105,7 @@ const Layout: React.FC<LayoutProps> = ({
       </header>
 
       {/* Main Content */}
-      <main className="flex-1 max-w-4xl mx-auto w-full px-4 py-6">
+      <main className="flex-1 max-w-7xl mx-auto w-full px-4 py-6">
         {children}
       </main>
 

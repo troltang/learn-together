@@ -1,4 +1,3 @@
-
 import { FlashCardText, ScienceQA, EvaluationResult, Age, GameScenario, HandwritingResult, SceneInteraction } from "../types";
 
 // 🔴 在线预览专用：请将您的 智谱AI API Key 粘贴在下方引号中
@@ -56,10 +55,14 @@ const callGLM = async (messages: any[], model: string = "glm-4-flash", temperatu
 };
 
 const getAgeContext = (age: Age, lang: 'en' | 'zh') => {
-  if (age <= 4) return lang === 'en' ? "suitable for a 3-5 year old toddler (very simple basic vocabulary)" : "适合3-5岁幼儿 (非常简单的基础词汇)";
-  if (age <= 6) return lang === 'en' ? "suitable for a 6-8 year old child (school level vocabulary)" : "适合6-8岁儿童 (小学低年级词汇)";
-  if (age <= 9) return lang === 'en' ? "suitable for a 9-12 year old student (advanced/interesting vocabulary)" : "适合9-12岁学生 (进阶词汇)";
-  return "suitable for a 5 year old";
+  if (age <= 5) {
+      return lang === 'en' 
+        ? "Target Audience: 3-5 year old toddlers. STRICT CONSTRAINT: Words must be extremely common daily objects (e.g., Cat, Dog, Apple, Bus). NO abstract nouns (e.g. Dream, Future, Idea). Words max 4-5 letters. Sentences: MAX 3-4 WORDS. Pattern: 'It is a [word]'. Keep it extremely simple for a toddler." 
+        : "目标受众：3-5岁幼儿。严格约束：1. 必须是极其常见的具象名词（手、口、水）等笔画简单。2. 绝对不要抽象词汇（如梦想、未来）。3. 汉字必须是简单的独体字或常见字。4. 造句必须极简（3-5个字），如“这是小猫”。不要复杂的修饰语。";
+  }
+  if (age <= 7) return lang === 'en' ? "suitable for a 6-7 year old child. Simple school level vocabulary." : "适合6-7岁儿童。小学一年级水平，简单常用词。";
+  if (age <= 9) return lang === 'en' ? "suitable for a 8-9 year old student. Interesting vocabulary." : "适合8-9岁学生。进阶词汇，句子可以稍长。";
+  return "suitable for a 10-12 year old student";
 };
 
 // --- 1. Batch Text Generation ---
@@ -70,7 +73,9 @@ export const generateCardBatch = async (
   excludeWords: string[] = [] 
 ): Promise<FlashCardText[]> => {
   const ageRule = getAgeContext(age, language);
-  const excludePrompt = excludeWords.length > 0 ? `IMPORTANT: You MUST NOT generate any of the following words: ${JSON.stringify(excludeWords)}. Choose a completely DIFFERENT word.` : "";
+  const excludeStr = excludeWords.join(", ");
+  const excludePrompt = excludeWords.length > 0 ? 
+    `CRITICAL STRICT RULE: You MUST NOT generate any word present in this list: [${excludeStr}]. If a word is in the list, PICK ANOTHER. Randomize your selection.` : "";
   
   let systemPrompt = "";
   let userPrompt = "";
@@ -81,25 +86,23 @@ export const generateCardBatch = async (
   if (language === 'en') {
     systemPrompt = "You are an English teacher for Chinese kids. Return ONLY valid JSON.";
     if (isLetter) {
-        userPrompt = `Generate a JSON ARRAY of 5 unique English words ${ageRule} that start with the letter "${topic}".
-         ${excludePrompt}
-         Include Chinese translation for the WORD.
-         Include a simple example sentence using the word.
-         IMPORTANT: Include the Chinese translation of the sentence in 'sentenceTranslation'.
-         IMPORTANT: 'imagePrompt' must be EXTREMELY SIMPLE. Just the object name. e.g., "Apple".
-         
-         Return JSON format:
-         [{"word":"Apple","translation":"苹果","pinyin":"ˈæp.l","sentence":"I like to eat apples.","sentenceTranslation":"我喜欢吃苹果。","imagePrompt":"Apple"}, ...]`;
+        userPrompt = `生成一个由5个以字母“${topic}”开头的唯一英文单词组成的JSON数组${ageRule}。
+         ${excludePrompt} 为WORD包含中文翻译。
+         提供一个使用该单词的非常简单的例句（3-6个单词）。
+         重要提示：请在“sentenceTranslation”中包含句子的中文翻译。
+         重要提示：“imagePrompt”必须极其简洁。仅需对象名称，例如“苹果”。
+         返回的JSON格式如下：
+[{"word": "Apple", "translation": "苹果", "pinyin": "ˈæp.l", "sentence": "It is a red apple.", "sentenceTranslation": "这是一个红苹果。", "imagePrompt": "Apple"}, 。..]`;
     } else {
         userPrompt = `Generate a JSON ARRAY of 5 unique English words ${ageRule} related to the topic "${topic}". 
          ${excludePrompt}
          Include Chinese translation for the WORD.
-         Include a simple example sentence using the word.
+         Include a VERY SIMPLE example sentence (3-6 words) using the word.
          IMPORTANT: Include the Chinese translation of the sentence in 'sentenceTranslation'.
          IMPORTANT: 'imagePrompt' must be EXTREMELY SIMPLE. Just the object name.
          
          Return JSON format:
-         [{"word":"Apple","translation":"苹果","pinyin":"ˈæp.l","sentence":"I like to eat apples.","sentenceTranslation":"我喜欢吃苹果。","imagePrompt":"Apple"}, ...]`;
+         [{"word":"Apple","translation":"苹果","pinyin":"ˈæp.l","sentence":"I like apples.","sentenceTranslation":"我喜欢苹果。","imagePrompt":"Apple"}, ...]`;
     }
   } else {
     systemPrompt = "你是少儿汉语老师。请只返回 JSON 格式。";
@@ -109,7 +112,7 @@ export const generateCardBatch = async (
        word: 汉字 (如 "猫")
        translation: 英文含义
        pinyin: 拼音
-       sentence: 造句
+       sentence: 极简造句 (3-6个字)
        sentenceTranslation: 句子的英文翻译
        imagePrompt: 英文的物体名称，只写物体名字，不要其他修饰词。例如 "Cat".
        
@@ -118,12 +121,11 @@ export const generateCardBatch = async (
   }
 
   try {
-    const jsonStr = await callGLM([{ role: "system", content: systemPrompt }, { role: "user", content: userPrompt }], "glm-4-flash", 0.8);
+    const jsonStr = await callGLM([{ role: "system", content: systemPrompt }, { role: "user", content: userPrompt }], "glm-4-flash", 0.9); // Higher temp for randomness
     const res = JSON.parse(jsonStr);
     return Array.isArray(res) ? res : [res];
   } catch (e) {
     console.error("Batch parse error", e);
-    // Fallback single item to prevent crash
     return [{
       word: topic, translation: "...", pinyin: "", 
       sentence: "Please try again.", sentenceTranslation: "请重试。", imagePrompt: topic
@@ -131,10 +133,32 @@ export const generateCardBatch = async (
   }
 };
 
-// --- 2. Image Generation (Replaced with Search Result Hack) ---
+// --- New AI Image Gen using CogView ---
+export const generateAIImage = async (prompt: string): Promise<string> => {
+    if (!API_KEY) return "https://picsum.photos/400/300";
+    try {
+        const response = await fetch(`${BASE_URL}/images/generations`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${API_KEY}`
+            },
+            body: JSON.stringify({
+                model: "CogView-3-Flash",
+                prompt: prompt,
+            })
+        });
+        if (!response.ok) throw new Error(await response.text());
+        const data = await response.json();
+        return data.data[0].url;
+    } catch (e) {
+        console.error("AI Image Generation Error:", e);
+        return "https://picsum.photos/400/300"; // Fallback
+    }
+}
+
+// --- 2. Image Generation (Search) ---
 export const generateImageForCard = async (prompt: string): Promise<string> => {
-  // Use Bing Image Search Thumbnail API as a proxy for "Search Result"
-  // Optimized prompt for children: "cartoon illustration"
   try {
       const searchUrl = `https://tse1-mm.cn.bing.net/th?q=${encodeURIComponent(prompt + " cartoon illustration")}&w=600&h=600&c=7&rs=1&p=0&pid=1.7`;
       return Promise.resolve(searchUrl);
@@ -143,10 +167,70 @@ export const generateImageForCard = async (prompt: string): Promise<string> => {
   }
 };
 
-// --- 3. Writing Tasks ---
+// --- 3. Line Art / Drawing ---
+export const getDrawingTopic = async (age: Age, excludeList: string[] = []): Promise<string> => {
+    const ageRule = age <= 5 
+        ? "suitable for a 3-5 year old toddler. Very simple object (e.g. Apple, Sun, Flower, Ball). Single noun."
+        : getAgeContext(age, 'en');
+    
+    // Convert recent history to string for exclusion
+    const excludedStr = excludeList.slice(-20).join(", "); // Check last 20
+
+    const prompt = `为适合儿童绘画/涂色的简单物体生成一个名词。 
+    ${ageRule}。 
+    关键：选择一些简单的动物、水果等，如小猫、狗、太阳等。
+    例如返回JSON：{"topic": "苹果" }`;
+    
+    try {
+        const res = JSON.parse(await callGLM([{ role: "user", content: prompt }], "glm-4-flash", 0.95)); 
+        return res.topic || "Sun";
+    } catch {
+        return "Flower";
+    }
+};
+
+export const getLineArtImage = async (prompt: string): Promise<string> => {
+    try {
+        // Use AI Image Generation for better, stricter results
+        const aiPrompt = `以${prompt}为主题的简单黑白线条艺术，适合儿童的涂色页风格，白色背景，无阴影，线条粗犷，极简主义。`;
+        return await generateAIImage(aiPrompt);
+    } catch (e) {
+        return "https://picsum.photos/400/300";
+    }
+};
+
+export const gradeDrawing = async (topic: string, imageBase64: string, age: Age): Promise<HandwritingResult> => {
+    const ts = Date.now();
+    const prompt = `You are a kind and encouraging art teacher for a ${age} year old child.
+    The child drew a "${topic}".
+    
+    Task: Rate the drawing.
+    1. Score from 1-3 stars (3=Great, 2=Good, 1=Keep trying).
+    2. Provide a short, encouraging comment in CHINESE suitable for a child.
+    
+    Return JSON: { "score": 1-3, "comment": "Chinese comment here" }
+    Request ID: ${ts}`;
+  
+    try {
+      const response = await fetch(`${BASE_URL}/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${API_KEY}` },
+        body: JSON.stringify({
+          model: "glm-4v-flash",
+          messages: [{ role: "user", content: [{ type: "text", text: prompt }, { type: "image_url", image_url: { url: `data:image/png;base64,${imageBase64}` } }] }]
+        })
+      });
+      let content = (await response.json()).choices[0].message.content.replace(/```json\n?|\n?```/g, "").trim();
+      return JSON.parse(content);
+    } catch (e) {
+      console.error("Drawing grading failed", e);
+      return { score: 3, comment: "画得真棒！很有创意！" }; 
+    }
+};
+
+// --- 4. Writing Tasks ---
 export const generateWritingTaskBatch = async (age: Age, excludeChars: string[]): Promise<string[]> => {
   const ageRule = getAgeContext(age, 'zh');
-  // Pass accumulated history to exclude list (limit length to avoid huge prompts)
   const excludeSample = excludeChars.slice(-50).join(","); 
   const excludePrompt = excludeChars.length > 0 ? `AVOID these characters: ${excludeSample}` : "";
   
@@ -166,44 +250,49 @@ export const generateWritingTaskBatch = async (age: Age, excludeChars: string[])
 export const evaluatePronunciation = async (targetWord: string, userSpokenText: string, language: 'en' | 'zh'): Promise<EvaluationResult> => {
   if (!userSpokenText) return { score: 1, comment: "没听清，请大声一点哦！" };
   const prompt = `
-    Role: Pronunciation Teacher.
+    Role: Pronunciation Teacher for Kids.
     Target Word: "${targetWord}"
-    What the student actually said (recognized text): "${userSpokenText}"
+    Student Said (Recognized): "${userSpokenText}"
     Language: ${language === 'en' ? 'English' : 'Chinese'}
 
-    Task: Compare the target word with what was spoken.
-    1. If they match closely (ignoring case/punctuation), give score 3.
-    2. If they are somewhat related or similar sound, give score 2.
-    3. If completely different, give score 1.
+    Task:
+    1. Compare the target word with what was spoken.
+    2. Break down the target word into syllables (English) or characters (Chinese).
+    3. Determine if each part was pronounced correctly based on the recognized text.
+    4. Give a score (1-3). 3=Excellent, 2=Close, 1=Needs Improvement.
 
     Return JSON:
     {
       "score": number (1-3),
       "comment": "Short encouraging feedback in Chinese",
-      "userPhonetic": "IPA or Pinyin of spoken text",
-      "correctPhonetic": "IPA or Pinyin of target word",
-      "details": "Specific advice in Chinese"
+      "userPhonetic": "IPA/Pinyin of spoken text (approx)",
+      "correctPhonetic": "IPA/Pinyin of target word",
+      "breakdown": [
+         { "text": "Syl", "pinyinOrIpa": "...", "status": "correct" },
+         { "text": "la", "pinyinOrIpa": "...", "status": "incorrect" },
+         { "text": "ble", "pinyinOrIpa": "...", "status": "correct" }
+      ]
     }
   `;
   try { 
       return JSON.parse(await callGLM([{ role: "user", content: prompt }])); 
   } catch (e) { 
-      return { score: 1, comment: "加油！再试一次。" }; 
+      // Fallback
+      return { 
+          score: 1, 
+          comment: "加油！再试一次。",
+          breakdown: targetWord.split('').map(c => ({ text: c, status: 'incorrect' }))
+      }; 
   }
 };
 
 export const gradeHandwriting = async (targetChar: string, imageBase64: string, isChinese: boolean): Promise<HandwritingResult> => {
-  // Add randomness to prompt to avoid caching generic responses
   const ts = Date.now();
-  const prompt = `请扮演一位严格但亲切的书法老师。
+  const prompt = `请扮演一位亲切的书法老师。
   任务：针对学生手写的${isChinese ? '汉字' : '字母'} “${targetChar}” 进行评分。
   
-  评价例子标准：
-  1. 笔画是否完整。
-  2. 笔顺是否看起来自然。
-  
   要求：
-  - 必须根据**看到的图片**给出具体的评价，不要说套话。比如“竖画写歪了”、“圆圈画得不够圆”、“位置偏上了”等。
+  - 必须根据**看到的图片**给出简洁的评价。
   - 评分 1-3 分 (3=优秀, 2=良好, 1=需练习).
   - 返回JSON: { "score": 1-3, "comment": "简短的中文具体建议" }
   
@@ -241,19 +330,13 @@ export const getScienceSuggestions = async (age: Age): Promise<string[]> => {
 
 export const askScienceQuestion = async (question: string, age: Age, history: {role: string, content: string}[] = []): Promise<ScienceQA> => {
   const ageRule = getAgeContext(age, 'zh');
-  const systemPrompt = `You are "Professor Panda" (熊猫教授), a wise and funny science teacher for kids.
-  Target Audience: ${ageRule}.
-  
-  Instructions:
-  1. Answer the user's question in Chinese. Keep it simple, fun, and engaging. Use emojis.
-  2. If the user's input is not a question (e.g. "Wow", "Hello"), just chat back in character.
-  3. Identify the main subject for an illustration (English noun).
-  
-  Format your response exactly like this:
-  ANSWER: [Your Answer Here]
-  KEYWORD: [Main subject English noun only, e.g. "Rainbow"]`;
+  const systemPrompt = `你是“熊猫教授”，一位睿智又风趣的儿童科学老师。
+  目标受众：${ageRule}岁人群。
+  指令：1. 用中文回答用户的问题。回答要简洁、有趣且吸引人。可以使用表情符号。
+  2. 如果用户的输入不是问题（例如“哇”，“你好”），只需以角色身份进行回复。
+  3. 确定插图的主要主题（名词）。
+  请按照以下格式回答： {"ANSWER":"在此处填写您的答案","KEYWORD":"仅限主要主题的名词，例如（彩虹）"}`;
 
-  // Filter history to last 6 messages to keep context window manageable
   const contextMessages = history.slice(-6).map(h => ({
       role: h.role === 'user' ? 'user' : 'assistant',
       content: h.content

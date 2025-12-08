@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { HistoryItem, AppView } from '../types';
 
@@ -8,9 +7,10 @@ interface HistoryModalProps {
   history: HistoryItem[];
   onRestore: (item: HistoryItem) => void;
   onClear: () => void;
+  onResetProgress: () => void; // New prop for resetting score
 }
 
-const HistoryModal: React.FC<HistoryModalProps> = ({ isOpen, onClose, history, onRestore, onClear }) => {
+const HistoryModal: React.FC<HistoryModalProps> = ({ isOpen, onClose, history, onRestore, onClear, onResetProgress }) => {
   const [selectedDate, setSelectedDate] = useState<string>("");
 
   // Group by Date Key (YYYY-MM-DD) using Local Time
@@ -50,6 +50,19 @@ const HistoryModal: React.FC<HistoryModalProps> = ({ isOpen, onClose, history, o
       const dateObj = new Date(y, m - 1, d);
       return dateObj.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit', weekday: 'short' });
   };
+
+  const handleResetScore = () => {
+      if (window.confirm("确定要将所有积分和等级归零吗？此操作不可恢复。")) {
+          onResetProgress();
+          onClose();
+      }
+  };
+
+  const handleClearHistory = () => {
+      if (window.confirm("确定要清空所有学习记录吗？")) {
+          onClear();
+      }
+  }
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
@@ -149,8 +162,13 @@ const HistoryModal: React.FC<HistoryModalProps> = ({ isOpen, onClose, history, o
           )}
         </div>
 
-        <div className="p-4 border-t border-gray-100 bg-white flex justify-between">
-          <button onClick={onClear} className="text-red-400 text-sm hover:underline">清空所有记录</button>
+        <div className="p-4 border-t border-gray-100 bg-white flex justify-between items-center gap-4">
+          <button onClick={handleClearHistory} className="text-gray-400 text-sm hover:text-red-500 flex items-center gap-1 transition-colors">
+              🗑️ 清空历史
+          </button>
+          <button onClick={handleResetScore} className="text-gray-400 text-sm hover:text-orange-500 flex items-center gap-1 transition-colors">
+              🏆 重置积分
+          </button>
         </div>
       </div>
     </div>

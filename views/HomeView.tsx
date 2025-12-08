@@ -1,5 +1,4 @@
-
-import React from 'react';
+import React, { useRef, useState } from 'react';
 import { AppView, UserProgress } from '../types';
 
 interface HomeViewProps {
@@ -7,130 +6,180 @@ interface HomeViewProps {
   progress: UserProgress;
 }
 
+// Reusable Drag-to-Scroll Container
+const ScrollContainer: React.FC<{ children: React.ReactNode, className?: string }> = ({ children, className = "" }) => {
+  const ref = useRef<HTMLDivElement>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [startX, setStartX] = useState(0);
+  const [scrollLeft, setScrollLeft] = useState(0);
+
+  const onMouseDown = (e: React.MouseEvent) => {
+    if (!ref.current) return;
+    setIsDragging(true);
+    setStartX(e.pageX - ref.current.offsetLeft);
+    setScrollLeft(ref.current.scrollLeft);
+  };
+
+  const onMouseLeave = () => setIsDragging(false);
+  const onMouseUp = () => setIsDragging(false);
+
+  const onMouseMove = (e: React.MouseEvent) => {
+    if (!isDragging || !ref.current) return;
+    e.preventDefault();
+    const x = e.pageX - ref.current.offsetLeft;
+    const walk = (x - startX) * 1.5; // Scroll speed multiplier
+    ref.current.scrollLeft = scrollLeft - walk;
+  };
+
+  return (
+    <div 
+      ref={ref}
+      className={`${className} ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
+      onMouseDown={onMouseDown}
+      onMouseLeave={onMouseLeave}
+      onMouseUp={onMouseUp}
+      onMouseMove={onMouseMove}
+    >
+      {children}
+    </div>
+  );
+};
+
 const HomeView: React.FC<HomeViewProps> = ({ onNavigate, progress }) => {
   const coreModules = [
     {
       id: AppView.ENGLISH,
       title: '英语启蒙',
-      subtitle: '单词 • 发音',
+      subtitle: 'English',
       icon: '🅰️',
       color: 'bg-kid-pink',
-      desc: 'AI 纠正发音'
     },
     {
       id: AppView.CHINESE,
       title: '汉语识字',
-      subtitle: '汉字 • 拼音',
+      subtitle: 'Chinese',
       icon: '🀄',
       color: 'bg-kid-yellow',
-      desc: '田字格识字'
     },
     {
-      id: AppView.WRITING, // New Module
+      id: AppView.MATH,
+      title: '趣味算术',
+      subtitle: 'Math',
+      icon: '🔢',
+      color: 'bg-blue-400',
+    },
+    {
+      id: AppView.WRITING, 
       title: '写字练习',
-      subtitle: 'Writing Practice',
+      subtitle: 'Writing',
       icon: '✏️',
       color: 'bg-kid-green',
-      desc: '汉字 • 字母 • 数字'
-    }
+    },
+    {
+      id: AppView.DRAWING,
+      title: '小小画家',
+      subtitle: 'Painting',
+      icon: '🎨',
+      color: 'bg-purple-400',
+    },
   ];
 
   const activityModules = [
     {
       id: AppView.GAME,
       title: '冒险闯关',
-      subtitle: 'Word Adventure',
+      subtitle: 'Adventure',
       icon: '🗺️',
       color: 'bg-green-400',
-      desc: '用词汇去冒险'
     },
     {
       id: AppView.SCENE,
       title: '情景对话',
-      subtitle: 'Roleplay Fun',
+      subtitle: 'Chat',
       icon: '🎭',
       color: 'bg-orange-400',
-      desc: '动漫角色聊天'
     },
     {
       id: AppView.SCIENCE,
-      title: '十万个为什么',
-      subtitle: 'Science Explorer',
+      title: '百科问答',
+      subtitle: 'Science',
       icon: '🚀',
       color: 'bg-kid-blue',
-      desc: '科学百科问答'
     }
   ];
 
   const XP_PER_LEVEL = 100;
 
-  const renderCard = (m: any, isLarge: boolean = false) => {
+  const renderCard = (m: any) => {
     // @ts-ignore
     const stats = progress[m.id] || { xp: 0, level: 1, items: 0 };
     const progressPercent = (stats.xp % XP_PER_LEVEL) / XP_PER_LEVEL * 100;
 
     return (
-      <button
+      <div
         key={m.id}
-        onClick={() => onNavigate(m.id as AppView)}
-        className={`group relative overflow-hidden rounded-3xl p-6 transition-all duration-300 hover:scale-[1.02] hover:shadow-2xl shadow-lg bg-white text-left border-2 border-transparent hover:border-white flex flex-col justify-between 
-          ${isLarge ? 'min-h-[220px]' : 'min-h-[180px]'}`}
+        onClick={(e) => {
+            // Prevent click if it was a drag gesture (simple check)
+            // In a real app we might measure distance, but React events bubble.
+            // Since the click happens on MouseUp, if we are dragging, we should prevent navigation?
+            // For simplicity, we just navigate. If user drags significantly, browser usually prevents 'click'.
+            onNavigate(m.id as AppView)
+        }}
+        className="relative flex-shrink-0 w-36 h-40 sm:w-44 sm:h-48 rounded-3xl p-4 bg-white shadow-lg border-2 border-transparent hover:border-blue-200 hover:scale-105 transition-all duration-300 flex flex-col justify-between overflow-hidden snap-center select-none cursor-pointer"
       >
-        <div className={`absolute top-0 right-0 w-40 h-40 -mr-10 -mt-10 rounded-full opacity-15 transition-transform group-hover:scale-150 ${m.color}`}></div>
-        <div className={`absolute bottom-0 left-0 w-24 h-24 -ml-8 -mb-8 rounded-full opacity-10 ${m.color}`}></div>
+        <div className={`absolute top-0 right-0 w-24 h-24 -mr-6 -mt-6 rounded-full opacity-15 ${m.color}`}></div>
+        <div className={`absolute bottom-0 left-0 w-16 h-16 -ml-4 -mb-4 rounded-full opacity-10 ${m.color}`}></div>
         
-        <div className="relative z-10 w-full">
-          <div className="flex justify-between items-start mb-2">
-             <span className={`${isLarge ? 'text-6xl' : 'text-5xl'} block shadow-sm transform group-hover:rotate-12 transition-transform`}>{m.icon}</span>
-             <div className="bg-gray-100/80 backdrop-blur-sm rounded-lg px-3 py-1 text-xs font-bold text-gray-500 shadow-sm">
-               Lv.{stats.level}
-             </div>
-          </div>
-          
-          <h3 className={`${isLarge ? 'text-2xl' : 'text-xl'} font-bold text-gray-800 group-hover:text-kid-purple transition-colors`}>{m.title}</h3>
-          <p className="text-sm font-semibold text-gray-400 mb-2">{m.subtitle}</p>
+        <div className="relative z-10 w-full text-center pointer-events-none">
+          <div className="text-4xl sm:text-5xl mb-2 drop-shadow-sm">{m.icon}</div>
+          <h3 className="text-lg sm:text-xl font-bold text-gray-800 leading-tight">{m.title}</h3>
+          <p className="text-xs text-gray-400 font-bold mt-1 uppercase">{m.subtitle}</p>
         </div>
 
-        <div className="relative z-10 w-full mt-auto pt-4">
-          <div className="flex justify-between text-xs font-bold text-gray-400 mb-1">
-            <span>XP: {stats.xp}</span>
-            <span>{Math.round(progressPercent)}%</span>
+        <div className="relative z-10 w-full mt-2 pointer-events-none">
+          <div className="flex justify-between text-[10px] font-bold text-gray-400 mb-1">
+            <span>Lv.{stats.level}</span>
+            <span>{stats.xp}XP</span>
           </div>
-          <div className="w-full bg-gray-100 rounded-full h-2.5 overflow-hidden ring-1 ring-gray-200">
+          <div className="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden">
             <div 
-              className={`h-2.5 rounded-full transition-all duration-1000 ${m.color.replace('bg-', 'bg-')}`} 
+              className={`h-1.5 rounded-full transition-all duration-1000 ${m.color.replace('bg-', 'bg-')}`} 
               style={{ width: `${progressPercent}%` }}
             ></div>
           </div>
         </div>
-      </button>
+      </div>
     );
   };
 
   return (
-    <div className="space-y-10 animate-fade-in-up pb-10">
-      <div className="text-center space-y-2 py-4">
-        <h2 className="text-4xl font-black text-gray-800 tracking-tight">你好! 👋 <span className="text-kid-blue">今天想学什么？</span></h2>
+    <div className="flex flex-col h-full justify-center space-y-8 animate-fade-in-up pb-4 select-none">
+      <div className="text-center py-2">
+        <h2 className="text-3xl font-black text-gray-800 tracking-tight">你好! 👋 <span className="text-kid-blue">今天学点什么？</span></h2>
       </div>
 
       <section>
-        <div className="flex items-center gap-2 mb-4 px-2">
-           <span className="text-2xl">📚</span>
-           <h3 className="text-xl font-bold text-gray-700">核心课程</h3>
+        <div className="flex items-center gap-2 mb-3 px-4">
+           <span className="text-xl">📚</span>
+           <h3 className="text-lg font-bold text-gray-700">核心课程</h3>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {coreModules.map(m => renderCard(m, true))}
-        </div>
+        
+        <ScrollContainer className="flex gap-4 overflow-x-auto pb-6 px-4 no-scrollbar snap-x touch-pan-x">
+          {coreModules.map(m => renderCard(m))}
+          <div className="w-2 flex-shrink-0"></div>
+        </ScrollContainer>
       </section>
 
       <section>
-        <div className="flex items-center gap-2 mb-4 px-2">
-           <span className="text-2xl">🎡</span>
-           <h3 className="text-xl font-bold text-gray-700">趣味探索</h3>
+        <div className="flex items-center gap-2 mb-3 px-4">
+           <span className="text-xl">🎡</span>
+           <h3 className="text-lg font-bold text-gray-700">趣味探索</h3>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-           {activityModules.map(m => renderCard(m, false))}
-        </div>
+        
+        <ScrollContainer className="flex gap-4 overflow-x-auto pb-6 px-4 no-scrollbar snap-x touch-pan-x">
+           {activityModules.map(m => renderCard(m))}
+           <div className="w-2 flex-shrink-0"></div>
+        </ScrollContainer>
       </section>
     </div>
   );

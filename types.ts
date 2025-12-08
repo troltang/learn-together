@@ -1,4 +1,3 @@
-
 export enum AppView {
   HOME = 'HOME',
   ENGLISH = 'ENGLISH',
@@ -7,6 +6,8 @@ export enum AppView {
   SCIENCE = 'SCIENCE',
   GAME = 'GAME',
   SCENE = 'SCENE',
+  DRAWING = 'DRAWING', // New Module
+  MATH = 'MATH',
 }
 
 export enum LoadingState {
@@ -28,6 +29,7 @@ export interface FlashCardText {
   sentence: string;
   sentenceTranslation: string;
   imagePrompt: string;
+  assignedVoice?: VoiceId; // Sticky voice for consistency
 }
 
 export interface FlashCard extends FlashCardText {
@@ -40,12 +42,19 @@ export interface ScienceQA {
   imageUrl?: string;
 }
 
+export interface EvaluationPart {
+  text: string;        // The syllable or character (e.g., "Ap", "ple" or "苹", "果")
+  pinyinOrIpa?: string; // The phonetic for this specific part
+  status: 'correct' | 'incorrect';
+}
+
 export interface EvaluationResult {
   score: number;
   comment: string;
   userPhonetic?: string;
   correctPhonetic?: string;
   details?: string;
+  breakdown?: EvaluationPart[]; // New: Structured analysis
 }
 
 export interface HandwritingResult {
@@ -86,16 +95,18 @@ export interface UserProgress {
   [AppView.ENGLISH]: ModuleProgress;
   [AppView.CHINESE]: ModuleProgress;
   [AppView.WRITING]: ModuleProgress;
+  [AppView.MATH]: ModuleProgress;
   [AppView.SCIENCE]: ModuleProgress;
   [AppView.GAME]: ModuleProgress;
   [AppView.SCENE]: ModuleProgress;
+  [AppView.DRAWING]: ModuleProgress;
 }
 
 export interface HistoryItem {
   id: string;
-  type: 'FLASHCARD' | 'SCIENCE' | 'WRITING';
+  type: 'FLASHCARD' | 'SCIENCE' | 'WRITING' | 'DRAWING' | 'MATH';
   timestamp: number;
-  data: FlashCard | ScienceQA | { char: string, type: string };
+  data: FlashCard | ScienceQA | { char: string, type: string } | { topic: string } | { question: string, result: string };
   mode?: AppView; 
   preview: string;
 }

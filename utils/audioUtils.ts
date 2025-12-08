@@ -1,4 +1,3 @@
-// utils/audioUtils.ts
 import { VoiceId } from '../types';
 
 let currentAudio: HTMLAudioElement | null = null;
@@ -36,9 +35,9 @@ interface PlayableAudio {
   dispose: () => void;
 }
 
-const AVAILABLE_VOICES = [
+export const AVAILABLE_VOICES = [
   'zh-CN-XiaoyuMultilingualNeural', // Boy
-  'zh-CN-XiaoxiaoMultilingualNeural', // Young Woman
+//  'zh-CN-XiaoxiaoMultilingualNeural', // Young Woman
   'zh-CN-XiaoshuangNeural' // Girl
 ];
 
@@ -54,12 +53,12 @@ export const preloadAudio = async (text: string, voiceId: VoiceId) => {
 };
 
 // Helper to refresh token from the homepage source
-const refreshTTSOnlineToken = async (): Promise<string | null> => {
+export const refreshTTSOnlineToken = async (): Promise<string | null> => {
     try {
         console.log("Attempting to refresh TTS token...");
         const targetUrl = 'https://www.ttsonline.cn/';
         // Use proxy to get the HTML content
-        const proxyUrl = 'https://seep.eu.org/' + encodeURIComponent(targetUrl);
+        const proxyUrl = 'https://1252112082-cocmqc4jel.ap-guangzhou.tencentscf.com/proxy?url=' + encodeURIComponent(targetUrl);
         
         const response = await fetch(proxyUrl);
         const html = await response.text();
@@ -80,7 +79,7 @@ const refreshTTSOnlineToken = async (): Promise<string | null> => {
 // Helper to perform the actual fetch
 const performTTSFetch = async (text: string, voice: string, token: string): Promise<string> => {
     const targetUrl = 'https://www.ttsonline.cn/getSpeek.php';
-    const proxyUrl = 'https://seep.eu.org/' + encodeURIComponent(targetUrl);
+    const proxyUrl = 'https://1252112082-cocmqc4jel.ap-guangzhou.tencentscf.com/proxy?url=' + encodeURIComponent(targetUrl);
 
     const params = new URLSearchParams();
     params.append('language', '中文（普通话，简体）');
@@ -88,14 +87,14 @@ const performTTSFetch = async (text: string, voice: string, token: string): Prom
     params.append('text', text);
     params.append('role', '0');
     params.append('style', '0');
-    params.append('rate', '-5');
+    params.append('rate', '-2'); // -2 approximates 0.8x speed better than -5
     params.append('pitch', '0');
     params.append('kbitrate', 'audio-16khz-32kbitrate-mono-mp3');
     params.append('silence', '');
     params.append('styledegree', '1');
     params.append('volume', '75');
     params.append('predict', '0');
-    params.append('yzm', '202409282320'); // Timestamp might need update too if strictly checked, but usually token is key
+    params.append('yzm', '202409282320'); 
     params.append('replice', '1');
     params.append('token', token);
 
@@ -117,7 +116,7 @@ const performTTSFetch = async (text: string, voice: string, token: string): Prom
     if (data.code === 200 && data.download) {
         // Fetch valid MP3
         const fileUrl = data.download;
-        const proxyFileUrl = 'https://seep.eu.org/' + encodeURIComponent(fileUrl);
+        const proxyFileUrl = 'https://1252112082-cocmqc4jel.ap-guangzhou.tencentscf.com/proxy?url=' + encodeURIComponent(fileUrl);
         
         const fileRes = await fetch(proxyFileUrl);
         if (!fileRes.ok) throw new Error("Audio file fetch failed");
@@ -143,7 +142,7 @@ const getBestAudio = async (text: string, voiceId: VoiceId, returnPlayer: boolea
 
   // Strategy 0: Check Cache (Immediate)
   if (audioCache.has(cacheKey)) {
-      if (!returnPlayer) return; // Preload finished basically
+      if (!returnPlayer) return; 
       const blobUrl = audioCache.get(cacheKey)!;
       const audio = new Audio(blobUrl);
       return {
@@ -200,7 +199,7 @@ const getBestAudio = async (text: string, voiceId: VoiceId, returnPlayer: boolea
   try {
     const blobUrl = await fetchPromise;
     audioCache.set(cacheKey, blobUrl);
-    pendingRequests.delete(cacheKey); // Cleanup pending
+    pendingRequests.delete(cacheKey); 
 
     if (!returnPlayer) return;
 
@@ -216,8 +215,7 @@ const getBestAudio = async (text: string, voiceId: VoiceId, returnPlayer: boolea
         dispose: () => {}
     };
   } catch (e) {
-    pendingRequests.delete(cacheKey); // Cleanup failed pending
-    // console.warn("TTSOnline failed, falling back to native", e);
+    pendingRequests.delete(cacheKey); 
   }
 
   // Strategy 3: Browser Native (Fallback)
@@ -238,7 +236,7 @@ const speakNative = (text: string): Promise<void> => {
 
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = 'zh-CN'; 
-    utterance.rate = 0.85; 
+    utterance.rate = 0.5; // Set to 0.8x speed as requested
     
     const voices = window.speechSynthesis.getVoices();
     const preferredVoice = voices.find(v => 
@@ -262,13 +260,16 @@ export const cancelAudio = () => {
   if (window.speechSynthesis) {
     window.speechSynthesis.cancel();
   }
+  // Short timeout to allow promises to resolve with cancelled state
   setTimeout(() => { sequenceCancelled = false; }, 50);
 };
 
-export const speakText = async (text: string, voiceId: VoiceId = 'RANDOM'): Promise<void> => {
-  cancelAudio();
-  await new Promise(r => setTimeout(r, 50));
-  sequenceCancelled = false;
+export const speakText = async (text: string, voiceId: VoiceId = 'RANDOM', cancelPrevious = true): Promise<void> => {
+  if (cancelPrevious) {
+    cancelAudio();
+    await new Promise(r => setTimeout(r, 50));
+    sequenceCancelled = false;
+  }
   
   const audioTask = await getBestAudio(text, voiceId);
   if (audioTask && !sequenceCancelled) {
@@ -277,8 +278,28 @@ export const speakText = async (text: string, voiceId: VoiceId = 'RANDOM'): Prom
   }
 };
 
-export const playCombinedAudio = async (text: string, voiceId: VoiceId) => {
-    return speakText(text, voiceId);
+export const playSequence = async (texts: string[], voiceId: VoiceId) => {
+    // Cancel any currently playing sequence
+    cancelAudio();
+    await new Promise(r => setTimeout(r, 60));
+    sequenceCancelled = false;
+
+    // 1. PRE-FETCH ALL to ensure no gaps
+    // We launch all requests in parallel
+    const prefetchPromises = texts.map(text => getBestAudio(text, voiceId, false));
+    await Promise.all(prefetchPromises);
+
+    if (sequenceCancelled) return;
+
+    // 2. Play sequentially from cache
+    for (const text of texts) {
+        if (sequenceCancelled) break;
+        // Don't cancel previous inside the loop, we are managing the sequence
+        // This call will be instant because of step 1
+        await speakText(text, voiceId, false);
+        // Small natural pause
+        if (!sequenceCancelled) await new Promise(r => setTimeout(r, 200));
+    }
 };
 
 export const startSpeechRecognition = (

@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import Layout from './components/Layout';
 import HistoryModal from './components/HistoryModal';
@@ -8,7 +7,10 @@ import ScienceView from './views/ScienceView';
 import GameView from './views/GameView';
 import SceneView from './views/SceneView';
 import WritingView from './views/WritingView';
+import DrawingView from './views/DrawingView';
+import MathView from './views/MathView';
 import { AppView, UserProgress, ModuleProgress, Age, HistoryItem, FlashCard, ScienceQA, VoiceId } from './types';
+import { refreshTTSOnlineToken } from './utils/audioUtils';
 
 const INITIAL_MODULE_STATE: ModuleProgress = { xp: 0, level: 1, items: 0 };
 
@@ -16,9 +18,11 @@ const INITIAL_PROGRESS: UserProgress = {
   [AppView.ENGLISH]: { ...INITIAL_MODULE_STATE },
   [AppView.CHINESE]: { ...INITIAL_MODULE_STATE },
   [AppView.WRITING]: { ...INITIAL_MODULE_STATE },
+  [AppView.MATH]: { ...INITIAL_MODULE_STATE },
   [AppView.SCIENCE]: { ...INITIAL_MODULE_STATE },
   [AppView.GAME]: { ...INITIAL_MODULE_STATE },
   [AppView.SCENE]: { ...INITIAL_MODULE_STATE },
+  [AppView.DRAWING]: { ...INITIAL_MODULE_STATE },
 };
 
 const XP_PER_LEVEL = 100;
@@ -26,7 +30,7 @@ const XP_PER_LEVEL = 100;
 const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<AppView>(AppView.HOME);
   const [progress, setProgress] = useState<UserProgress>(INITIAL_PROGRESS);
-  const [age, setAge] = useState<Age>(5); // Default Age 5
+  const [age, setAge] = useState<Age>(3); // Default Age 3
   const [voiceId, setVoiceId] = useState<VoiceId>('RANDOM');
   
   const [history, setHistory] = useState<HistoryItem[]>([]);
@@ -36,22 +40,39 @@ const App: React.FC = () => {
   const [initialScienceQA, setInitialScienceQA] = useState<ScienceQA | undefined>(undefined);
   const [viewKey, setViewKey] = useState(0);
 
+  // Initial Load (Progress, History, Age, Token)
   useEffect(() => {
+    // 1. Progress
     const savedProgress = localStorage.getItem('kid_app_progress');
     if (savedProgress) {
       try {
         const parsed = JSON.parse(savedProgress);
+        // Ensure new modules exist in saved data
         if (!parsed[AppView.WRITING]) parsed[AppView.WRITING] = { ...INITIAL_MODULE_STATE };
+        if (!parsed[AppView.DRAWING]) parsed[AppView.DRAWING] = { ...INITIAL_MODULE_STATE };
+        if (!parsed[AppView.MATH]) parsed[AppView.MATH] = { ...INITIAL_MODULE_STATE };
+        
         setProgress(prev => ({ ...prev, ...parsed }));
       } catch (e) { console.error("Failed to load progress", e); }
     }
 
+    // 2. History
     const savedHistory = localStorage.getItem('kid_app_history');
     if (savedHistory) {
       try {
         setHistory(JSON.parse(savedHistory));
       } catch (e) { console.error("Failed to load history", e); }
     }
+
+    // 3. Age Persistence
+    const savedAge = localStorage.getItem('kid_app_age');
+    if (savedAge) {
+      setAge(parseInt(savedAge, 10) as Age);
+    }
+
+    // 4. Preload TTS Token
+    refreshTTSOnlineToken();
+
   }, []);
 
   useEffect(() => {
@@ -61,6 +82,10 @@ const App: React.FC = () => {
   useEffect(() => {
     localStorage.setItem('kid_app_history', JSON.stringify(history));
   }, [history]);
+
+  useEffect(() => {
+    localStorage.setItem('kid_app_age', age.toString());
+  }, [age]);
 
   const handleUpdateProgress = (view: keyof UserProgress, xpDelta: number, itemsDelta: number = 0) => {
     setProgress(prev => {
@@ -77,6 +102,12 @@ const App: React.FC = () => {
         }
       };
     });
+  };
+
+  const handleResetProgress = () => {
+      setProgress(INITIAL_PROGRESS);
+      // Optional: Clear storage immediately or let useEffect handle it
+      localStorage.setItem('kid_app_progress', JSON.stringify(INITIAL_PROGRESS));
   };
 
   const handleAddToHistory = (item: Omit<HistoryItem, 'id' | 'timestamp'>) => {
@@ -152,6 +183,16 @@ const App: React.FC = () => {
             onAddToHistory={(data) => handleAddToHistory({ type: 'WRITING', data, preview: data.char })}
           />
         );
+      case AppView.MATH:
+        return (
+          <MathView
+            key={`math-${viewKey}`}
+            difficulty={age}
+            voiceId={voiceId}
+            onUpdateProgress={(xp, items) => handleUpdateProgress(AppView.MATH, xp, items)}
+            onAddToHistory={(data) => handleAddToHistory({ type: 'MATH', data, preview: data.question })}
+          />
+        );
       case AppView.SCIENCE:
         return (
           <ScienceView 
@@ -182,6 +223,16 @@ const App: React.FC = () => {
             onUpdateProgress={(xp, items) => handleUpdateProgress(AppView.SCENE, xp, items)}
           />
         );
+      case AppView.DRAWING:
+        return (
+          <DrawingView
+            key={`drawing-${viewKey}`}
+            difficulty={age}
+            voiceId={voiceId}
+            onUpdateProgress={(xp, items) => handleUpdateProgress(AppView.DRAWING, xp, items)}
+            onAddToHistory={(data) => handleAddToHistory({ type: 'DRAWING', data, preview: data.topic })}
+          />
+        );
       default:
         return <HomeView onNavigate={handleNavigate} progress={progress} />;
     }
@@ -208,6 +259,7 @@ const App: React.FC = () => {
         history={history}
         onRestore={handleRestoreHistory}
         onClear={() => setHistory([])}
+        onResetProgress={handleResetProgress}
       />
     </>
   );
