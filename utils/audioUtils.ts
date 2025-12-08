@@ -270,6 +270,7 @@ export const cancelAudio = () => {
 export const speakText = async (text: string, voiceId: VoiceId = 'RANDOM', cancelPrevious = true): Promise<void> => {
   if (cancelPrevious) {
     cancelAudio();
+    // Synchronous blocking usually not good, but here we just need short gap
     await new Promise(r => setTimeout(r, 50));
     sequenceCancelled = false;
   }
@@ -325,7 +326,6 @@ export const startSpeechRecognition = (
         currentRecognition.onend = null; // Prevent callbacks from old instance
         currentRecognition.onerror = null;
         currentRecognition.stop();
-        // Do not abort here, as it might kill a pending result processing
     } catch(e) {}
     currentRecognition = null;
   }
@@ -334,27 +334,29 @@ export const startSpeechRecognition = (
   currentRecognition = recognition;
 
   recognition.lang = lang === 'en' ? 'en-US' : 'zh-CN';
-  recognition.continuous = false;
-  // CRITICAL: Set interimResults to true. 
-  // On Mobile Safari/Android, stopping the recognition manually often causes it to close 
-  // without firing a 'final' result event if capturing was short. 
-  // We must capture interim results and use the last one if available.
+  // IMPORTANT: Set continuous to TRUE for Android "Hold to Speak".
+  // If false, Android stops excessively early (aggressive VAD).
+  // We manually call stop() on release, so true is safe and preferred here.
+  recognition.continuous = true;
   recognition.interimResults = true;
+  recognition.maxAlternatives = 1;
 
   let finalTranscript = '';
   let interimTranscript = '';
   let hasReturnedResult = false;
 
   recognition.onresult = (event: any) => {
-    let currentInterim = '';
+    // Reset interim for this event loop
+    interimTranscript = '';
+    
+    // With continuous=true, resultIndex iterates. We must append new finals.
     for (let i = event.resultIndex; i < event.results.length; ++i) {
       if (event.results[i].isFinal) {
         finalTranscript += event.results[i][0].transcript;
       } else {
-        currentInterim += event.results[i][0].transcript;
+        interimTranscript += event.results[i][0].transcript;
       }
     }
-    interimTranscript = currentInterim;
   };
 
   recognition.onend = () => {
@@ -363,6 +365,7 @@ export const startSpeechRecognition = (
     }
     
     if (!hasReturnedResult) {
+        // Fallback: Combine whatever we captured
         const fullText = (finalTranscript + interimTranscript).trim();
         if (fullText) {
             hasReturnedResult = true;
