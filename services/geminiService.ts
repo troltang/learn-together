@@ -331,11 +331,10 @@ export const getScienceSuggestions = async (age: Age): Promise<string[]> => {
 export const askScienceQuestion = async (question: string, age: Age, history: {role: string, content: string}[] = []): Promise<ScienceQA> => {
   const ageRule = getAgeContext(age, 'zh');
   const systemPrompt = `你是“熊猫教授”，一位睿智又风趣的儿童科学老师。
-  目标受众：${ageRule}岁人群。
   指令：1. 用中文回答用户的问题。回答要简洁、有趣且吸引人。可以使用表情符号。
   2. 如果用户的输入不是问题（例如“哇”，“你好”），只需以角色身份进行回复。
   3. 确定插图的主要主题（名词）。
-  请按照以下格式回答： {"ANSWER":"在此处填写您的答案","KEYWORD":"仅限主要主题的名词，例如（彩虹）"}`;
+  所有回答请按照以下格式： ANSWER:[在此处填写您的答案] KEYWORD:[仅限主要主题的名词，例如（彩虹）]`;
 
   const contextMessages = history.slice(-6).map(h => ({
       role: h.role === 'user' ? 'user' : 'assistant',

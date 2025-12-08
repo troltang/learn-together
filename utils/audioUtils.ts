@@ -320,10 +320,10 @@ export const startSpeechRecognition = (
     return null;
   }
 
-  // Stop any existing instance to prevent conflict errors
+  // Stop any existing instance
   if (currentRecognition) {
     try {
-        currentRecognition.onend = null; // Prevent callbacks from old instance
+        currentRecognition.onend = null; 
         currentRecognition.onerror = null;
         currentRecognition.stop();
     } catch(e) {}
@@ -334,29 +334,29 @@ export const startSpeechRecognition = (
   currentRecognition = recognition;
 
   recognition.lang = lang === 'en' ? 'en-US' : 'zh-CN';
-  // IMPORTANT: Set continuous to TRUE for Android "Hold to Speak".
-  // If false, Android stops excessively early (aggressive VAD).
-  // We manually call stop() on release, so true is safe and preferred here.
+  
+  // Continuous = true is CRITICAL for Android to prevent auto-stop on silence
   recognition.continuous = true;
-  recognition.interimResults = true;
+  recognition.interimResults = true; 
   recognition.maxAlternatives = 1;
 
   let finalTranscript = '';
   let interimTranscript = '';
   let hasReturnedResult = false;
+  let didReportError = false;
 
   recognition.onresult = (event: any) => {
-    // Reset interim for this event loop
-    interimTranscript = '';
+    // Re-calc interim every time
+    let currentInterim = '';
     
-    // With continuous=true, resultIndex iterates. We must append new finals.
     for (let i = event.resultIndex; i < event.results.length; ++i) {
       if (event.results[i].isFinal) {
         finalTranscript += event.results[i][0].transcript;
       } else {
-        interimTranscript += event.results[i][0].transcript;
+        currentInterim += event.results[i][0].transcript;
       }
     }
+    interimTranscript = currentInterim;
   };
 
   recognition.onend = () => {
@@ -364,12 +364,15 @@ export const startSpeechRecognition = (
         currentRecognition = null;
     }
     
-    if (!hasReturnedResult) {
+    if (!hasReturnedResult && !didReportError) {
         // Fallback: Combine whatever we captured
         const fullText = (finalTranscript + interimTranscript).trim();
         if (fullText) {
             hasReturnedResult = true;
             onResult(fullText);
+        } else {
+            // Report "No Speech" if we truly got nothing
+            onError("没听到声音，请按住大声说话");
         }
     }
     onEnd(); 
@@ -385,31 +388,51 @@ export const startSpeechRecognition = (
         return;
     }
 
-    // Map errors to friendly messages
     let msg = "语音识别出错";
     if (event.error === 'no-speech') {
-        msg = "没听到声音，请大声一点";
+        // On Android, 'no-speech' might fire if held but silent. 
+        // We handle this in onend usually, but if it errors out, report it.
+        msg = "没听到声音";
     } else if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
         msg = "请允许麦克风权限";
     } else if (event.error === 'network') {
         msg = "网络连接不稳定";
     }
 
-    // Only report error if we haven't successfully captured text.
-    // Sometimes 'no-speech' fires after capturing text in some browsers.
-    if (!hasReturnedResult && !finalTranscript && !interimTranscript) {
+    // Only report error if we haven't successfully captured text
+    if (!hasReturnedResult && !finalTranscript) {
+        didReportError = true;
         console.warn("Speech recognition error:", event.error);
         onError(msg);
     }
-    // onend will fire after onerror
   };
+
+  const startTime = Date.now();
 
   try {
     recognition.start();
-    return recognition;
   } catch (e) {
     console.error(e);
     onError("无法启动录音，请刷新页面重试");
     return null;
   }
+
+  // Return a safe wrapper
+  return {
+      stop: () => {
+          const elapsed = Date.now() - startTime;
+          // Ensure we run for at least 800ms to allow Android engine to warm up
+          // Otherwise it might throw 'no-speech' or 'aborted' immediately without result
+          if (elapsed < 800) {
+              setTimeout(() => {
+                  try { recognition.stop(); } catch(e){}
+              }, 800 - elapsed);
+          } else {
+              try { recognition.stop(); } catch(e){}
+          }
+      },
+      abort: () => {
+          try { recognition.abort(); } catch(e){}
+      }
+  };
 };
