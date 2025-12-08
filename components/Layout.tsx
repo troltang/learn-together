@@ -1,5 +1,5 @@
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { AppView, Age, VoiceId } from '../types';
 
 interface LayoutProps {
@@ -25,6 +25,51 @@ const Layout: React.FC<LayoutProps> = ({
   onSetVoiceId,
   onOpenHistory
 }) => {
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  useEffect(() => {
+    // 1. Sync state with actual browser fullscreen state
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+
+    // 2. Try to auto-enter fullscreen on first interaction (Browser policy requirement)
+    const handleFirstInteraction = () => {
+      if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen().catch(e => {
+          // Ignore errors (e.g., if user already cancelled or blocked)
+          console.debug("Auto-fullscreen blocked or cancelled", e);
+        });
+      }
+      // Remove listeners after first attempt
+      window.removeEventListener('click', handleFirstInteraction);
+      window.removeEventListener('touchstart', handleFirstInteraction);
+    };
+
+    window.addEventListener('click', handleFirstInteraction);
+    window.addEventListener('touchstart', handleFirstInteraction);
+
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      window.removeEventListener('click', handleFirstInteraction);
+      window.removeEventListener('touchstart', handleFirstInteraction);
+    };
+  }, []);
+
+  const toggleFullscreen = () => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch(e => {
+        alert("无法进入全屏模式");
+      });
+    } else {
+      if (document.exitFullscreen) {
+        document.exitFullscreen();
+      }
+    }
+  };
+
   return (
     <div className="min-h-screen flex flex-col font-sans text-gray-800">
       {/* Header */}
@@ -80,6 +125,15 @@ const Layout: React.FC<LayoutProps> = ({
               <span>{score}</span>
             </div>
             
+            {/* Fullscreen Toggle */}
+            <button 
+              onClick={toggleFullscreen}
+              className={`p-2 rounded-full transition-colors ${isFullscreen ? 'bg-purple-100 text-purple-600' : 'bg-gray-100 text-gray-500 hover:bg-purple-50'}`}
+              title={isFullscreen ? "退出全屏" : "全屏模式"}
+            >
+              {isFullscreen ? '↙️' : '↗️'}
+            </button>
+
             {/* History Button */}
             <button 
               onClick={onOpenHistory}
