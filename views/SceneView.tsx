@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import * as GeminiService from '../services/geminiService';
 import { SceneInteraction, LoadingState, VoiceId } from '../types';
@@ -186,11 +185,13 @@ const SceneView: React.FC<SceneViewProps> = ({ onUpdateProgress, voiceId }) => {
                 onTouchStart={(e) => { e.preventDefault(); startRecording(); }}
                 onMouseUp={stopRecording}
                 onTouchEnd={(e) => { e.preventDefault(); stopRecording(); }}
+                onTouchCancel={stopRecording}
                 onMouseLeave={stopRecording}
+                onContextMenu={(e) => e.preventDefault()}
                 className={`
                     w-20 h-20 rounded-full flex items-center justify-center text-4xl shadow-xl transition-all touch-none select-none border-4
                     ${isRecording 
-                        ? 'bg-red-500 border-red-300 text-white animate-pulse scale-95 ring-4 ring-red-200' 
+                        ? 'bg-red-500 border-red-300 text-white animate-pulse ring-4 ring-red-200' 
                         : 'bg-gradient-to-b from-orange-400 to-orange-500 border-orange-200 text-white hover:scale-105 active:scale-95'}
                 `}
             >

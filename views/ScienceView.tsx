@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect } from 'react';
 import * as GeminiService from '../services/geminiService';
 import { ScienceQA, LoadingState, Age, VoiceId } from '../types';
@@ -186,12 +185,14 @@ const ScienceView: React.FC<ScienceViewProps> = ({ onUpdateProgress, difficulty:
             onTouchStart={(e) => { e.preventDefault(); startListening(); }}
             onMouseUp={stopListening}
             onTouchEnd={(e) => { e.preventDefault(); stopListening(); }}
+            onTouchCancel={stopListening}
             onMouseLeave={stopListening}
+            onContextMenu={(e) => e.preventDefault()}
             disabled={status === LoadingState.LOADING} 
             className={`
                 h-20 w-20 rounded-full flex items-center justify-center text-4xl shadow-xl border-4 transition-all cursor-pointer touch-none
                 ${isRecording 
-                    ? 'bg-red-500 border-red-200 text-white animate-pulse scale-110 shadow-red-200' 
+                    ? 'bg-red-500 border-red-200 text-white animate-pulse shadow-red-200' 
                     : 'bg-gradient-to-b from-kid-green to-green-500 border-green-200 text-white hover:scale-105 active:scale-95 shadow-green-200'}
             `}
         >

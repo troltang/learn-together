@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { AppView, HistoryItem, GameScenario, LoadingState, Age, VoiceId } from '../types';
 import * as GeminiService from '../services/geminiService';
@@ -305,11 +304,13 @@ const GameView: React.FC<GameViewProps> = ({ history, difficulty: age, voiceId, 
                         onTouchStart={(e) => { e.preventDefault(); startListening(); }}
                         onMouseUp={stopListening}
                         onTouchEnd={(e) => { e.preventDefault(); stopListening(); }}
+                        onTouchCancel={stopListening}
                         onMouseLeave={stopListening}
+                        onContextMenu={(e) => e.preventDefault()}
                         className={`
                         w-24 h-24 rounded-full flex items-center justify-center text-5xl shadow-2xl border-4 transition-all touch-none select-none
                         ${isRecording 
-                            ? 'bg-red-500 border-red-300 scale-95 animate-pulse ring-4 ring-red-500/30' 
+                            ? 'bg-red-500 border-red-300 animate-pulse ring-4 ring-red-500/30' 
                             : 'bg-gradient-to-b from-green-400 to-green-600 border-green-300 hover:scale-105 hover:shadow-green-500/50 active:scale-95'}
                         `}
                     >

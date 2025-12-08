@@ -561,12 +561,14 @@ const FlashCardView: React.FC<FlashCardViewProps> = ({ mode, difficulty: age, vo
                                     <button 
                                         onMouseDown={startRecording}
                                         onTouchStart={(e) => { e.preventDefault(); startRecording(); }}
-                                        onMouseUp={stopRecording}
                                         onTouchEnd={(e) => { e.preventDefault(); stopRecording(); }}
+                                        onTouchCancel={stopRecording}
+                                        onMouseUp={stopRecording}
                                         onMouseLeave={stopRecording}
+                                        onContextMenu={(e) => e.preventDefault()}
                                         className={`w-16 h-16 rounded-full flex items-center justify-center text-3xl shadow-lg transition-all active:scale-95 touch-none select-none
                                             ${isRecording 
-                                                ? 'bg-red-500 text-white animate-pulse ring-4 ring-red-200 scale-95' 
+                                                ? 'bg-red-500 text-white animate-pulse ring-4 ring-red-200' 
                                                 : 'bg-green-100 text-green-600 hover:bg-green-200'}`}
                                     >
                                         {isRecording ? <RecordingWaveform /> : '🎙️'}

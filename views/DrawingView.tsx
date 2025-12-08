@@ -316,7 +316,9 @@ const DrawingView: React.FC<DrawingViewProps> = ({ difficulty: age, voiceId, onU
                         onTouchStart={(e) => { e.preventDefault(); handleVoiceCommand(); }}
                         onMouseUp={stopVoice}
                         onTouchEnd={(e) => { e.preventDefault(); stopVoice(); }}
+                        onTouchCancel={stopVoice}
                         onMouseLeave={stopVoice}
+                        onContextMenu={(e) => e.preventDefault()}
                         className={`
                             flex items-center justify-center w-16 h-14 rounded-full font-bold shadow-md transition-all select-none text-2xl
                             ${isRecording 
