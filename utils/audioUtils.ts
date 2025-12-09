@@ -366,13 +366,18 @@ export const startSpeechRecognition = (
     
     if (!hasReturnedResult && !didReportError) {
         // Fallback: Combine whatever we captured
+        // ANDROID FIX: Sometimes Android Chrome has results in interimTranscript but fires onend before moving it to final.
         const fullText = (finalTranscript + interimTranscript).trim();
         if (fullText) {
             hasReturnedResult = true;
             onResult(fullText);
         } else {
-            // Report "No Speech" if we truly got nothing
-            onError("没听到声音，请按住大声说话");
+            // Only report "No Speech" if we truly got nothing and it wasn't a manual stop
+            // We can't distinguish manual stop easily here without tracking state, 
+            // but usually the caller handles the UI reset on onEnd().
+            // Only fire error if it seems like a failure.
+            // But usually onEnd is just "cleanup". 
+            // The caller is responsible for checking if they got text.
         }
     }
     onEnd(); 
@@ -390,8 +395,6 @@ export const startSpeechRecognition = (
 
     let msg = "语音识别出错";
     if (event.error === 'no-speech') {
-        // On Android, 'no-speech' might fire if held but silent. 
-        // We handle this in onend usually, but if it errors out, report it.
         msg = "没听到声音";
     } else if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
         msg = "请允许麦克风权限";
@@ -400,7 +403,7 @@ export const startSpeechRecognition = (
     }
 
     // Only report error if we haven't successfully captured text
-    if (!hasReturnedResult && !finalTranscript) {
+    if (!hasReturnedResult && !finalTranscript && !interimTranscript) {
         didReportError = true;
         console.warn("Speech recognition error:", event.error);
         onError(msg);
@@ -421,15 +424,17 @@ export const startSpeechRecognition = (
   return {
       stop: () => {
           const elapsed = Date.now() - startTime;
-          // Ensure we run for at least 800ms to allow Android engine to warm up
-          // Otherwise it might throw 'no-speech' or 'aborted' immediately without result
-          if (elapsed < 800) {
-              setTimeout(() => {
-                  try { recognition.stop(); } catch(e){}
-              }, 800 - elapsed);
-          } else {
-              try { recognition.stop(); } catch(e){}
-          }
+          // Android fix: If stop is called too quickly, it might trigger 'no-speech' or 'aborted' 
+          // without returning results that might be buffered. 
+          // We enforce a minimum recording time simulation.
+          const delay = elapsed < 1000 ? 1000 - elapsed : 0;
+          
+          setTimeout(() => {
+              try { 
+                  // Some Android browsers need to be told to stop to fire final result
+                  recognition.stop(); 
+              } catch(e){}
+          }, delay);
       },
       abort: () => {
           try { recognition.abort(); } catch(e){}

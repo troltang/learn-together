@@ -1,4 +1,5 @@
-import { FlashCardText, ScienceQA, EvaluationResult, Age, GameScenario, HandwritingResult, SceneInteraction } from "../types";
+
+import { FlashCardText, ScienceQA, EvaluationResult, Age, GameScenario, HandwritingResult, SceneInteraction, ScienceFact } from "../types";
 
 // 🔴 在线预览专用：请将您的 智谱AI API Key 粘贴在下方引号中
 const HARDCODED_API_KEY = "47023eeb5c024b9fb2149a072e02724f.6D3eXSB64cwze7tZ"; 
@@ -325,6 +326,58 @@ export const getScienceSuggestions = async (age: Age): Promise<string[]> => {
         return Array.isArray(res) ? res : ["天空为什么是蓝色的？", "鱼会睡觉吗？", "月亮为什么会跟着我走？"];
     } catch {
         return ["天空为什么是蓝色的？", "鱼会睡觉吗？", "月亮为什么会跟着我走？"];
+    }
+}
+
+export const generateScienceFact = async (age: Age): Promise<ScienceFact> => {
+    const ageRule = getAgeContext(age, 'zh');
+    const prompt = `Generate a random, interesting science fact for a ${age} year old child. 
+    Topics can include animals, space, body, nature, physics (simple).
+    
+    Return JSON:
+    {
+      "topic": "Title in Chinese (e.g. 为什么天是蓝的?)",
+      "fact": "Short teaser/hook in Chinese (e.g. 阳光其实是彩虹颜色的!)",
+      "detail": "用中文做科学解释",
+      "imagePrompt": "Cute cartoon illustration of [topic], educational, clear"
+    }`;
+    
+    try {
+        return JSON.parse(await callGLM([{ role: "user", content: prompt }]));
+    } catch (e) {
+        return {
+            topic: "月亮",
+            fact: "月亮不会发光哦！",
+            detail: "月亮像一面镜子，反射太阳的光。所以我们晚上能看到明亮的月亮。",
+            imagePrompt: "Cute moon reflecting sunlight cartoon"
+        };
+    }
+}
+
+export const generateScienceFactBatch = async (age: Age): Promise<ScienceFact[]> => {
+    const ageRule = getAgeContext(age, 'zh');
+    const prompt = `Generate a JSON ARRAY of 3 random, interesting science facts for a ${age} year old child. 
+    Topics must be diverse (Animals, Space, Nature, Human Body).
+    
+    Return JSON format:
+    [{
+      "topic": "Title in Chinese",
+      "fact": "Short teaser/hook in Chinese",
+      "detail": "Simple scientific explanation in Chinese",
+      "imagePrompt": "Cute cartoon illustration of [topic], educational, clear, single object"
+    }, ...]`;
+    
+    try {
+        const res = JSON.parse(await callGLM([{ role: "user", content: prompt }], "glm-4-flash", 0.9));
+        return Array.isArray(res) ? res : [res];
+    } catch (e) {
+        console.error(e);
+        return [{
+            topic: "月亮",
+            fact: "月亮不会发光哦！",
+            detail: "月亮像一面镜子，反射太阳的光。所以我们晚上能看到明亮的月亮。",
+            imagePrompt: "Cute moon reflecting sunlight cartoon"
+        }];
     }
 }
 

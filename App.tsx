@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import Layout from './components/Layout';
 import HistoryModal from './components/HistoryModal';
@@ -147,6 +148,7 @@ const App: React.FC = () => {
     switch (currentView) {
       case AppView.HOME:
         return <HomeView onNavigate={handleNavigate} progress={progress} />;
+      
       case AppView.ENGLISH:
         return (
           <FlashCardView 
@@ -173,6 +175,7 @@ const App: React.FC = () => {
             history={history}
           />
         );
+
       case AppView.WRITING:
         return (
           <WritingView 
@@ -201,7 +204,7 @@ const App: React.FC = () => {
             voiceId={voiceId}
             onUpdateProgress={(xp, items) => handleUpdateProgress(AppView.SCIENCE, xp, items)}
             initialData={initialScienceQA}
-            onAddToHistory={(data) => handleAddToHistory({ type: 'SCIENCE', data, preview: data.question })}
+            onAddToHistory={(data) => handleAddToHistory({ type: 'SCIENCE', data, preview: (data as any).question || (data as any).topic })}
           />
         );
       case AppView.GAME:

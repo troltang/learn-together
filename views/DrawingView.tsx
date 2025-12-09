@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { AppView, LoadingState, Age, VoiceId, HandwritingResult } from '../types';
 import * as GeminiService from '../services/geminiService';
@@ -202,11 +203,11 @@ const DrawingView: React.FC<DrawingViewProps> = ({ difficulty: age, voiceId, onU
   const colors = ["#000000", "#FF0000", "#00FF00", "#0000FF", "#FFFF00", "#FFA500", "#800080", "#FFC0CB", "#A52A2A"];
 
   return (
-    <div className="max-w-3xl mx-auto h-[calc(100vh-140px)] flex flex-col gap-4 relative">
+    <div className="w-full h-[calc(100vh-140px)] flex flex-col gap-4 relative px-4 max-w-7xl mx-auto">
         <Celebration trigger={celebrationTrigger} />
 
         {/* Header */}
-        <div className="bg-gradient-to-r from-purple-400 to-pink-400 p-4 rounded-3xl shadow-md flex justify-between items-center text-white">
+        <div className="bg-gradient-to-r from-purple-400 to-pink-400 p-4 rounded-3xl shadow-md flex justify-between items-center text-white shrink-0">
             <div className="flex items-center gap-4">
                 <span className="text-4xl">🎨</span>
                 <div>
@@ -220,7 +221,7 @@ const DrawingView: React.FC<DrawingViewProps> = ({ difficulty: age, voiceId, onU
         </div>
 
         {/* Main Canvas Area */}
-        <div className="flex-1 relative bg-white rounded-3xl shadow-lg border-4 border-gray-200 overflow-hidden touch-none">
+        <div className="flex-1 relative bg-white rounded-3xl shadow-lg border-4 border-gray-200 overflow-hidden touch-none w-full">
             {status === LoadingState.LOADING && (
                 <div className="absolute inset-0 flex items-center justify-center z-50 bg-white">
                     <Loading text="准备画纸中..." />
@@ -267,7 +268,7 @@ const DrawingView: React.FC<DrawingViewProps> = ({ difficulty: age, voiceId, onU
         </div>
 
         {/* Tools */}
-        <div className="bg-white p-4 rounded-3xl shadow-lg border border-gray-100 flex flex-col gap-4">
+        <div className="bg-white p-4 rounded-3xl shadow-lg border border-gray-100 flex flex-col gap-4 shrink-0 max-w-4xl mx-auto w-full">
             {/* Colors & Actions Row */}
             <div className="flex gap-4 items-center justify-between overflow-x-auto pb-2 no-scrollbar">
                 <div className="flex gap-3">

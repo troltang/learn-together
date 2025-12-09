@@ -1,3 +1,4 @@
+
 import React, { useRef, useState } from 'react';
 import { AppView, UserProgress } from '../types';
 
@@ -119,10 +120,6 @@ const HomeView: React.FC<HomeViewProps> = ({ onNavigate, progress }) => {
       <div
         key={m.id}
         onClick={(e) => {
-            // Prevent click if it was a drag gesture (simple check)
-            // In a real app we might measure distance, but React events bubble.
-            // Since the click happens on MouseUp, if we are dragging, we should prevent navigation?
-            // For simplicity, we just navigate. If user drags significantly, browser usually prevents 'click'.
             onNavigate(m.id as AppView)
         }}
         className="relative flex-shrink-0 w-36 h-40 sm:w-44 sm:h-48 rounded-3xl p-4 bg-white shadow-lg border-2 border-transparent hover:border-blue-200 hover:scale-105 transition-all duration-300 flex flex-col justify-between overflow-hidden snap-center select-none cursor-pointer"

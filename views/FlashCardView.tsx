@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { AppView, FlashCard, LoadingState, EvaluationResult, Age, HandwritingResult, HistoryItem, FlashCardText, VoiceId } from '../types';
 import * as GeminiService from '../services/geminiService';
@@ -16,6 +17,7 @@ interface FlashCardViewProps {
   initialData?: FlashCard;
   onAddToHistory: (data: FlashCard) => void;
   history: HistoryItem[]; 
+  onModeSwitch?: (mode: AppView.ENGLISH | AppView.CHINESE) => void;
 }
 
 const TOPICS = {
@@ -44,7 +46,7 @@ const RecordingWaveform = () => {
   );
 };
 
-const FlashCardView: React.FC<FlashCardViewProps> = ({ mode, difficulty: age, voiceId, onUpdateProgress, initialData, onAddToHistory, history }) => {
+const FlashCardView: React.FC<FlashCardViewProps> = ({ mode, difficulty: age, voiceId, onUpdateProgress, initialData, onAddToHistory, history, onModeSwitch }) => {
   const [card, setCard] = useState<FlashCard | null>(null);
   const [textStatus, setTextStatus] = useState<LoadingState>(LoadingState.IDLE);
   const [isTransitioning, setIsTransitioning] = useState(false);
@@ -435,7 +437,7 @@ const FlashCardView: React.FC<FlashCardViewProps> = ({ mode, difficulty: age, vo
     <div className="max-w-xl mx-auto space-y-4 pb-24">
       <Celebration trigger={celebrationTrigger} />
 
-      <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-3">
         {mode === AppView.ENGLISH && (
           <div className="flex justify-center gap-3">
             <button onClick={() => { setSubMode('TOPIC'); setSelectedTopic(TOPICS[AppView.ENGLISH][0]); setIsLetterPractice(false); }} className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all border-2 ${subMode === 'TOPIC' ? btnActive : btnInactive}`}>🧩 主题</button>

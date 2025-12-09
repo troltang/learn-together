@@ -1,12 +1,14 @@
+
 export enum AppView {
   HOME = 'HOME',
   ENGLISH = 'ENGLISH',
   CHINESE = 'CHINESE',
+  // LANGUAGE = 'LANGUAGE', // Removed
   WRITING = 'WRITING',
   SCIENCE = 'SCIENCE',
   GAME = 'GAME',
   SCENE = 'SCENE',
-  DRAWING = 'DRAWING', // New Module
+  DRAWING = 'DRAWING', 
   MATH = 'MATH',
 }
 
@@ -40,6 +42,13 @@ export interface ScienceQA {
   question: string;
   answer: string;
   imageUrl?: string;
+}
+
+export interface ScienceFact {
+  topic: string;
+  fact: string; 
+  detail: string;
+  imagePrompt: string;
 }
 
 export interface EvaluationPart {
@@ -106,7 +115,7 @@ export interface HistoryItem {
   id: string;
   type: 'FLASHCARD' | 'SCIENCE' | 'WRITING' | 'DRAWING' | 'MATH';
   timestamp: number;
-  data: FlashCard | ScienceQA | { char: string, type: string } | { topic: string } | { question: string, result: string };
+  data: FlashCard | ScienceQA | ScienceFact | { char: string, type: string } | { topic: string } | { question: string, result: string };
   mode?: AppView; 
   preview: string;
 }
