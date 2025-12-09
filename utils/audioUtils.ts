@@ -1,3 +1,4 @@
+
 import { VoiceId } from '../types';
 
 let currentAudio: HTMLAudioElement | null = null;
@@ -335,8 +336,10 @@ export const startSpeechRecognition = (
 
   recognition.lang = lang === 'en' ? 'en-US' : 'zh-CN';
   
-  // Continuous = true is CRITICAL for Android to prevent auto-stop on silence
-  recognition.continuous = true;
+  // ANDROID FIX: Set continuous to false. 
+  // Many Android browsers fail to return results if continuous is true, especially in WebViews.
+  // This means the microphone will auto-stop after a pause, which is generally cleaner for Q&A anyway.
+  recognition.continuous = false;
   recognition.interimResults = true; 
   recognition.maxAlternatives = 1;
 
@@ -344,6 +347,10 @@ export const startSpeechRecognition = (
   let interimTranscript = '';
   let hasReturnedResult = false;
   let didReportError = false;
+
+  recognition.onstart = () => {
+      console.log("Speech recognition started");
+  };
 
   recognition.onresult = (event: any) => {
     // Re-calc interim every time
@@ -360,6 +367,7 @@ export const startSpeechRecognition = (
   };
 
   recognition.onend = () => {
+    console.log("Speech recognition ended");
     if (currentRecognition === recognition) {
         currentRecognition = null;
     }
@@ -372,12 +380,11 @@ export const startSpeechRecognition = (
             hasReturnedResult = true;
             onResult(fullText);
         } else {
-            // Only report "No Speech" if we truly got nothing and it wasn't a manual stop
-            // We can't distinguish manual stop easily here without tracking state, 
-            // but usually the caller handles the UI reset on onEnd().
-            // Only fire error if it seems like a failure.
-            // But usually onEnd is just "cleanup". 
-            // The caller is responsible for checking if they got text.
+            // DEBUG: Alert for troubleshooting on tablets as requested
+            const msg = "录音已结束，但未识别到内容 (No Result)";
+            alert(msg); // 弹出异常提示
+            onError(msg);
+            didReportError = true;
         }
     }
     onEnd(); 
@@ -393,19 +400,28 @@ export const startSpeechRecognition = (
         return;
     }
 
-    let msg = "语音识别出错";
+    console.error("Speech recognition error:", event.error);
+
+    let msg = `语音识别出错 (${event.error})`;
     if (event.error === 'no-speech') {
-        msg = "没听到声音";
+        msg = "未检测到声音 (no-speech)";
     } else if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
-        msg = "请允许麦克风权限";
+        msg = "请允许麦克风权限 (not-allowed)";
     } else if (event.error === 'network') {
-        msg = "网络连接不稳定";
+        msg = "网络连接不稳定 (network)";
+    } else if (event.error === 'audio-capture') {
+        msg = "麦克风被占用或无音频输入 (audio-capture)";
+    }
+
+    if (event.message) {
+        msg += ` - ${event.message}`;
     }
 
     // Only report error if we haven't successfully captured text
-    if (!hasReturnedResult && !finalTranscript && !interimTranscript) {
+    if (!hasReturnedResult) {
         didReportError = true;
-        console.warn("Speech recognition error:", event.error);
+        // DEBUG: Alert for troubleshooting on tablets
+        alert(msg); // 弹出异常提示
         onError(msg);
     }
   };
@@ -416,25 +432,18 @@ export const startSpeechRecognition = (
     recognition.start();
   } catch (e) {
     console.error(e);
-    onError("无法启动录音，请刷新页面重试");
+    const errMsg = "无法启动录音，请刷新页面重试";
+    alert(errMsg);
+    onError(errMsg);
     return null;
   }
 
   // Return a safe wrapper
   return {
       stop: () => {
-          const elapsed = Date.now() - startTime;
-          // Android fix: If stop is called too quickly, it might trigger 'no-speech' or 'aborted' 
-          // without returning results that might be buffered. 
-          // We enforce a minimum recording time simulation.
-          const delay = elapsed < 1000 ? 1000 - elapsed : 0;
-          
-          setTimeout(() => {
-              try { 
-                  // Some Android browsers need to be told to stop to fire final result
-                  recognition.stop(); 
-              } catch(e){}
-          }, delay);
+          try { 
+              recognition.stop(); 
+          } catch(e){}
       },
       abort: () => {
           try { recognition.abort(); } catch(e){}
