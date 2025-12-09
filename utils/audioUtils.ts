@@ -375,6 +375,16 @@ export const startSpeechRecognition = (
     currentRecognition = null;
   }
 
+  // WAKE UP HARDWARE: Request mic access explicitly first (Android quirk)
+  navigator.mediaDevices.getUserMedia({ audio: true })
+    .then(stream => {
+        // We just needed to wake it up, close this specific stream now
+        stream.getTracks().forEach(track => track.stop());
+    })
+    .catch(e => {
+        logDebug(`getUserMedia warning: ${e.message} (Is permission granted?)`);
+    });
+
   const recognition = new SpeechRecognition();
   currentRecognition = recognition;
 
@@ -390,6 +400,14 @@ export const startSpeechRecognition = (
   let interimTranscript = '';
   let hasReturnedResult = false;
   let didReportError = false;
+  
+  // Track audio signals
+  let hasDetectedSound = false;
+  
+  // START TIME TRACKING for Safe Stop
+  const startTime = Date.now();
+  // Minimum time (ms) to wait before allowing stop() to actually fire.
+  const MIN_RECORDING_DURATION = 1200; 
 
   logDebug(`Initializing SpeechRecognition (Lang: ${recognition.lang})`);
 
@@ -398,12 +416,24 @@ export const startSpeechRecognition = (
   };
 
   recognition.onaudiostart = () => {
-      logDebug("Event: onaudiostart (Audio signal detected)");
-  }
+      hasDetectedSound = true;
+      logDebug("Event: onaudiostart (Hardware Audio detected)");
+  };
+
+  recognition.onsoundstart = () => {
+      hasDetectedSound = true;
+      logDebug("Event: onsoundstart (Sound detected)");
+  };
+
+  recognition.onspeechstart = () => {
+      hasDetectedSound = true;
+      logDebug("Event: onspeechstart (Speech detected)");
+  };
 
   recognition.onresult = (event: any) => {
     // Re-calc interim every time
     let currentInterim = '';
+    hasDetectedSound = true; // Definitely heard something if we have results
     
     for (let i = event.resultIndex; i < event.results.length; ++i) {
       if (event.results[i].isFinal) {
@@ -411,9 +441,6 @@ export const startSpeechRecognition = (
         logDebug(`Result [Final]: ${event.results[i][0].transcript}`);
       } else {
         currentInterim += event.results[i][0].transcript;
-        // Don't log every single interim character update to avoid spamming DOM, 
-        // but can be useful if it never finalizes.
-        // logDebug(`Result [Interim]: ${event.results[i][0].transcript}`);
       }
     }
     interimTranscript = currentInterim;
@@ -430,7 +457,6 @@ export const startSpeechRecognition = (
     
     if (!hasReturnedResult && !didReportError) {
         // Fallback: Combine whatever we captured
-        // ANDROID FIX: Sometimes Android Chrome has results in interimTranscript but fires onend before moving it to final.
         const fullText = (finalTranscript + interimTranscript).trim();
         
         logDebug(`Processing end result. Captured: "${fullText}"`);
@@ -440,7 +466,10 @@ export const startSpeechRecognition = (
             logDebug(`Submitting success: "${fullText}"`);
             onResult(fullText);
         } else {
-            const msg = "录音已结束，但未识别到内容 (No Result)";
+            let msg = "录音已结束，但未识别到内容";
+            if (!hasDetectedSound) {
+                msg = "未检测到任何声音，请检查麦克风权限或设备是否静音";
+            }
             logDebug(`Error: ${msg}`);
             alert(msg); // Keep alert for visibility
             onError(msg);
@@ -499,14 +528,29 @@ export const startSpeechRecognition = (
     return null;
   }
 
-  // Return a safe wrapper
+  // Return a safe wrapper with Delayed Stop Logic
   return {
       stop: () => {
-          try { 
-              logDebug("Manual stop triggered");
-              recognition.stop(); 
-          } catch(e){
-              logDebug(`Exception stop(): ${e}`);
+          const elapsed = Date.now() - startTime;
+          const remaining = MIN_RECORDING_DURATION - elapsed;
+          
+          if (remaining > 0) {
+              logDebug(`Stop triggered early (${elapsed}ms). Safe Stop waiting ${remaining}ms...`);
+              setTimeout(() => {
+                  try { 
+                      logDebug("Executing delayed manual stop");
+                      recognition.stop(); 
+                  } catch(e){
+                      logDebug(`Exception delayed stop(): ${e}`);
+                  }
+              }, remaining);
+          } else {
+              try { 
+                  logDebug("Manual stop triggered");
+                  recognition.stop(); 
+              } catch(e){
+                  logDebug(`Exception stop(): ${e}`);
+              }
           }
       },
       abort: () => {
