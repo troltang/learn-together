@@ -1,4 +1,3 @@
-
 import { VoiceId } from '../types';
 
 let currentAudio: HTMLAudioElement | null = null;
@@ -15,6 +14,48 @@ let TTS_TOKEN = 'a72250317ca2ff2d27f01dabbef32ac3';
 
 // Singleton for SpeechRecognition to prevent overlaps
 let currentRecognition: any = null;
+
+// --- DEBUGGING UTILS ---
+const DEBUG_MODE = true; // Toggle this to false when done debugging
+
+const ensureDebugOverlay = () => {
+    if (!DEBUG_MODE) return;
+    if (!document.getElementById('debug-log-overlay')) {
+        const overlay = document.createElement('div');
+        overlay.id = 'debug-log-overlay';
+        overlay.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 200px;
+            background: rgba(0, 0, 0, 0.85);
+            color: #00ff00;
+            font-family: monospace;
+            font-size: 12px;
+            padding: 10px;
+            z-index: 99999;
+            overflow-y: auto;
+            pointer-events: none;
+            border-bottom: 2px solid #00ff00;
+        `;
+        document.body.appendChild(overlay);
+    }
+}
+
+const logDebug = (msg: string) => {
+    if (!DEBUG_MODE) return;
+    console.log(`[AudioUtils] ${msg}`);
+    ensureDebugOverlay();
+    const overlay = document.getElementById('debug-log-overlay');
+    if (overlay) {
+        const line = document.createElement('div');
+        line.style.marginBottom = '4px';
+        line.style.borderBottom = '1px solid #333';
+        line.innerText = `[${new Date().toLocaleTimeString()}] ${msg}`;
+        overlay.insertBefore(line, overlay.firstChild);
+    }
+};
 
 // Convert Blob to Base64 (for writing pad)
 export function blobToBase64(blob: Blob): Promise<string> {
@@ -317,13 +358,16 @@ export const startSpeechRecognition = (
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   
   if (!SpeechRecognition) {
-    onError("您的浏览器不支持语音识别");
+    const errMsg = "您的浏览器不支持语音识别";
+    logDebug(errMsg);
+    onError(errMsg);
     return null;
   }
 
   // Stop any existing instance
   if (currentRecognition) {
     try {
+        logDebug("Stopping existing recognition instance...");
         currentRecognition.onend = null; 
         currentRecognition.onerror = null;
         currentRecognition.stop();
@@ -338,7 +382,6 @@ export const startSpeechRecognition = (
   
   // ANDROID FIX: Set continuous to false. 
   // Many Android browsers fail to return results if continuous is true, especially in WebViews.
-  // This means the microphone will auto-stop after a pause, which is generally cleaner for Q&A anyway.
   recognition.continuous = false;
   recognition.interimResults = true; 
   recognition.maxAlternatives = 1;
@@ -348,9 +391,15 @@ export const startSpeechRecognition = (
   let hasReturnedResult = false;
   let didReportError = false;
 
+  logDebug(`Initializing SpeechRecognition (Lang: ${recognition.lang})`);
+
   recognition.onstart = () => {
-      console.log("Speech recognition started");
+      logDebug("Event: onstart (Microphone active)");
   };
+
+  recognition.onaudiostart = () => {
+      logDebug("Event: onaudiostart (Audio signal detected)");
+  }
 
   recognition.onresult = (event: any) => {
     // Re-calc interim every time
@@ -359,15 +408,22 @@ export const startSpeechRecognition = (
     for (let i = event.resultIndex; i < event.results.length; ++i) {
       if (event.results[i].isFinal) {
         finalTranscript += event.results[i][0].transcript;
+        logDebug(`Result [Final]: ${event.results[i][0].transcript}`);
       } else {
         currentInterim += event.results[i][0].transcript;
+        // Don't log every single interim character update to avoid spamming DOM, 
+        // but can be useful if it never finalizes.
+        // logDebug(`Result [Interim]: ${event.results[i][0].transcript}`);
       }
     }
     interimTranscript = currentInterim;
+    if (interimTranscript) {
+        logDebug(`Result [Interim Accum]: ${interimTranscript}`);
+    }
   };
 
   recognition.onend = () => {
-    console.log("Speech recognition ended");
+    logDebug("Event: onend (Recording stopped)");
     if (currentRecognition === recognition) {
         currentRecognition = null;
     }
@@ -376,13 +432,17 @@ export const startSpeechRecognition = (
         // Fallback: Combine whatever we captured
         // ANDROID FIX: Sometimes Android Chrome has results in interimTranscript but fires onend before moving it to final.
         const fullText = (finalTranscript + interimTranscript).trim();
+        
+        logDebug(`Processing end result. Captured: "${fullText}"`);
+
         if (fullText) {
             hasReturnedResult = true;
+            logDebug(`Submitting success: "${fullText}"`);
             onResult(fullText);
         } else {
-            // DEBUG: Alert for troubleshooting on tablets as requested
             const msg = "录音已结束，但未识别到内容 (No Result)";
-            alert(msg); // 弹出异常提示
+            logDebug(`Error: ${msg}`);
+            alert(msg); // Keep alert for visibility
             onError(msg);
             didReportError = true;
         }
@@ -395,12 +455,14 @@ export const startSpeechRecognition = (
         currentRecognition = null;
     }
     
-    // Ignore 'aborted' as it happens when we stop manually
     if (event.error === 'aborted') {
+        logDebug("Event: error (aborted) - ignoring");
         return;
     }
 
-    console.error("Speech recognition error:", event.error);
+    const errorStr = `Speech recognition error: ${event.error} ${event.message ? '- ' + event.message : ''}`;
+    console.error(errorStr);
+    logDebug(`Event: onError - ${event.error}`);
 
     let msg = `语音识别出错 (${event.error})`;
     if (event.error === 'no-speech') {
@@ -417,22 +479,21 @@ export const startSpeechRecognition = (
         msg += ` - ${event.message}`;
     }
 
-    // Only report error if we haven't successfully captured text
     if (!hasReturnedResult) {
         didReportError = true;
-        // DEBUG: Alert for troubleshooting on tablets
-        alert(msg); // 弹出异常提示
+        logDebug(`Reporting Fatal Error: ${msg}`);
+        alert(msg); // Keep alert for visibility
         onError(msg);
     }
   };
 
-  const startTime = Date.now();
-
   try {
+    logDebug("Calling recognition.start()...");
     recognition.start();
   } catch (e) {
     console.error(e);
     const errMsg = "无法启动录音，请刷新页面重试";
+    logDebug(`Exception start(): ${e}`);
     alert(errMsg);
     onError(errMsg);
     return null;
@@ -442,8 +503,11 @@ export const startSpeechRecognition = (
   return {
       stop: () => {
           try { 
+              logDebug("Manual stop triggered");
               recognition.stop(); 
-          } catch(e){}
+          } catch(e){
+              logDebug(`Exception stop(): ${e}`);
+          }
       },
       abort: () => {
           try { recognition.abort(); } catch(e){}
