@@ -28,16 +28,16 @@ const ensureDebugOverlay = () => {
             top: 0;
             left: 0;
             right: 0;
-            height: 300px; /* Increased height */
+            height: 300px;
             background: rgba(0, 0, 0, 0.9);
             color: #00ff00;
             font-family: monospace;
-            font-size: 14px; /* Larger font for tablet */
+            font-size: 14px;
             padding: 10px;
             z-index: 99999;
-            overflow-y: scroll; /* Allow scrolling */
-            pointer-events: auto; /* Allow interaction */
-            user-select: text; /* Allow text selection */
+            overflow-y: scroll;
+            pointer-events: auto;
+            user-select: text;
             -webkit-user-select: text;
             border-bottom: 2px solid #00ff00;
             white-space: pre-wrap;
@@ -66,7 +66,7 @@ const logDebug = (msg: string) => {
         line.style.marginBottom = '4px';
         line.style.borderBottom = '1px solid #333';
         line.innerText = `[${new Date().toLocaleTimeString()}] ${msg}`;
-        // Insert after the close button (which is firstChild usually)
+        // Insert after the close button
         if (overlay.children.length > 1) {
              overlay.insertBefore(line, overlay.children[1]);
         } else {
@@ -382,25 +382,23 @@ export const startSpeechRecognition = (
     return null;
   }
 
-  // Stop any existing instance
+  // 1. CLEANUP PREVIOUS INSTANCE AND AUDIO
   if (currentRecognition) {
     try {
         logDebug("Stopping existing recognition instance...");
         currentRecognition.onend = null; 
         currentRecognition.onerror = null;
-        currentRecognition.stop();
+        currentRecognition.abort(); // Use abort for immediate kill
     } catch(e) {}
     currentRecognition = null;
   }
-
-  // REMOVED: Concurrent getUserMedia check. 
-  // It was causing resource contention on Android tablets, resulting in Max Volume = 0 and silence for SpeechRecognition.
+  // Force audio to stop to release hardware focus
+  cancelAudio();
 
   const recognition = new SpeechRecognition();
   currentRecognition = recognition;
 
   // ANDROID FIX: Specific Language Codes
-  // 'zh' is sometimes ambiguous. 'cmn-Hans-CN' is safer for Mainland Chinese on Android.
   recognition.lang = lang === 'en' ? 'en-US' : 'cmn-Hans-CN';
   
   // ANDROID FIX: Set continuous to false. 
@@ -417,15 +415,25 @@ export const startSpeechRecognition = (
   let hasDetectedSound = false;
   
   // START TIME TRACKING for Safe Stop
-  const startTime = Date.now();
-  // Minimum time (ms) to wait before allowing stop() to actually fire.
-  // Increased to 2s for slower tablets.
+  let startTime = 0;
   const MIN_RECORDING_DURATION = 2000; 
+  let watchdogTimer: any = null;
 
   logDebug(`Initializing SpeechRecognition (Lang: ${recognition.lang})`);
 
   recognition.onstart = () => {
+      startTime = Date.now();
       logDebug("Event: onstart (Microphone active)");
+      
+      // WATCHDOG: If no sound detected in 2.5s, likely hung. Kill it.
+      watchdogTimer = setTimeout(() => {
+          if (!hasDetectedSound && !hasReturnedResult && !didReportError) {
+              logDebug("WATCHDOG: Audio engine hung (no sound detected). Aborting.");
+              recognition.abort();
+              didReportError = true;
+              onError("麦克风无响应，请重试 (Timeout)");
+          }
+      }, 2500);
   };
 
   recognition.onaudiostart = () => {
@@ -444,6 +452,8 @@ export const startSpeechRecognition = (
   };
 
   recognition.onresult = (event: any) => {
+    if (watchdogTimer) clearTimeout(watchdogTimer);
+    
     // Re-calc interim every time
     let currentInterim = '';
     hasDetectedSound = true; // Definitely heard something if we have results
@@ -463,7 +473,9 @@ export const startSpeechRecognition = (
   };
 
   recognition.onend = () => {
+    if (watchdogTimer) clearTimeout(watchdogTimer);
     logDebug("Event: onend (Recording stopped)");
+    
     if (currentRecognition === recognition) {
         currentRecognition = null;
     }
@@ -481,11 +493,9 @@ export const startSpeechRecognition = (
         } else {
             let msg = "录音已结束，但未识别到内容";
             if (!hasDetectedSound) {
-                msg = "引擎未检测到声音 (No audio signal detected by engine)";
+                msg = "引擎未检测到声音 (No audio signal detected)";
             }
             logDebug(`Error: ${msg}`);
-            // Only alert if we really think it failed hard, otherwise it gets annoying on retries
-            // alert(msg); 
             onError(msg);
             didReportError = true;
         }
@@ -494,6 +504,7 @@ export const startSpeechRecognition = (
   };
 
   recognition.onerror = (event: any) => {
+    if (watchdogTimer) clearTimeout(watchdogTimer);
     if (currentRecognition === recognition) {
         currentRecognition = null;
     }
@@ -525,26 +536,36 @@ export const startSpeechRecognition = (
     if (!hasReturnedResult) {
         didReportError = true;
         logDebug(`Reporting Fatal Error: ${msg}`);
-        alert(msg); // Keep alert for visibility
+        // alert(msg); // Reduced alert spam
         onError(msg);
     }
   };
 
-  try {
-    logDebug("Calling recognition.start()...");
-    recognition.start();
-  } catch (e) {
-    console.error(e);
-    const errMsg = "无法启动录音，请刷新页面重试";
-    logDebug(`Exception start(): ${e}`);
-    alert(errMsg);
-    onError(errMsg);
-    return null;
-  }
+  // 2. DELAYED START (Warm-up)
+  logDebug("Queueing start with 100ms delay...");
+  setTimeout(() => {
+      try {
+        if (currentRecognition !== recognition) return; // Cancelled during delay
+        logDebug("Calling recognition.start()...");
+        recognition.start();
+      } catch (e) {
+        console.error(e);
+        const errMsg = "无法启动录音，请刷新页面重试";
+        logDebug(`Exception start(): ${e}`);
+        onError(errMsg);
+      }
+  }, 100);
 
   // Return a safe wrapper with Delayed Stop Logic
   return {
       stop: () => {
+          if (startTime === 0) {
+              // start() hasn't fired onstart yet, or delayed start hasn't run
+              logDebug("Stop called before start() completed. Aborting.");
+              try { recognition.abort(); } catch(e){}
+              return;
+          }
+
           const elapsed = Date.now() - startTime;
           const remaining = MIN_RECORDING_DURATION - elapsed;
           
@@ -553,9 +574,6 @@ export const startSpeechRecognition = (
               setTimeout(() => {
                   try { 
                       logDebug("Executing delayed manual stop");
-                      if (!hasDetectedSound) {
-                          logDebug("WARNING: No sound detected even at delayed stop time.");
-                      }
                       recognition.stop(); 
                   } catch(e){
                       logDebug(`Exception delayed stop(): ${e}`);
@@ -564,9 +582,6 @@ export const startSpeechRecognition = (
           } else {
               try { 
                   logDebug("Manual stop triggered");
-                  if (!hasDetectedSound) {
-                      logDebug("WARNING: Stopping, but engine never reported 'onaudiostart'. Input likely dead.");
-                  }
                   recognition.stop(); 
               } catch(e){
                   logDebug(`Exception stop(): ${e}`);
