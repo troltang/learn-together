@@ -28,18 +28,31 @@ const ensureDebugOverlay = () => {
             top: 0;
             left: 0;
             right: 0;
-            height: 200px;
-            background: rgba(0, 0, 0, 0.85);
+            height: 300px; /* Increased height */
+            background: rgba(0, 0, 0, 0.9);
             color: #00ff00;
             font-family: monospace;
-            font-size: 12px;
+            font-size: 14px; /* Larger font for tablet */
             padding: 10px;
             z-index: 99999;
-            overflow-y: auto;
-            pointer-events: none;
+            overflow-y: scroll; /* Allow scrolling */
+            pointer-events: auto; /* Allow interaction */
+            user-select: text; /* Allow text selection */
+            -webkit-user-select: text;
             border-bottom: 2px solid #00ff00;
+            white-space: pre-wrap;
         `;
+        // Add a close/minimize button
+        const closeBtn = document.createElement('button');
+        closeBtn.innerText = "❌ Close Log";
+        closeBtn.style.cssText = "position: absolute; top: 5px; right: 5px; background: red; color: white; padding: 5px; border: none; font-weight: bold;";
+        closeBtn.onclick = () => { overlay.style.display = 'none'; };
+        overlay.appendChild(closeBtn);
+
         document.body.appendChild(overlay);
+    } else {
+        const overlay = document.getElementById('debug-log-overlay');
+        if (overlay) overlay.style.display = 'block';
     }
 }
 
@@ -53,7 +66,12 @@ const logDebug = (msg: string) => {
         line.style.marginBottom = '4px';
         line.style.borderBottom = '1px solid #333';
         line.innerText = `[${new Date().toLocaleTimeString()}] ${msg}`;
-        overlay.insertBefore(line, overlay.firstChild);
+        // Insert after the close button (which is firstChild usually)
+        if (overlay.children.length > 1) {
+             overlay.insertBefore(line, overlay.children[1]);
+        } else {
+             overlay.appendChild(line);
+        }
     }
 };
 
@@ -375,23 +393,61 @@ export const startSpeechRecognition = (
     currentRecognition = null;
   }
 
-  // WAKE UP HARDWARE: Request mic access explicitly first (Android quirk)
+  // TEST HARDWARE AUDIO PRESENCE
+  // This explicitly checks if the mic is sending data
   navigator.mediaDevices.getUserMedia({ audio: true })
     .then(stream => {
-        // We just needed to wake it up, close this specific stream now
-        stream.getTracks().forEach(track => track.stop());
+        logDebug("Hardware access granted. Analyzing audio stream...");
+        try {
+            const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+            const analyser = audioContext.createAnalyser();
+            const microphone = audioContext.createMediaStreamSource(stream);
+            microphone.connect(analyser);
+            analyser.fftSize = 256;
+            const bufferLength = analyser.frequencyBinCount;
+            const dataArray = new Uint8Array(bufferLength);
+            
+            // Check volume for 200ms
+            let maxVol = 0;
+            const checkVol = setInterval(() => {
+                analyser.getByteFrequencyData(dataArray);
+                let sum = 0;
+                for(let i = 0; i < bufferLength; i++) {
+                    sum += dataArray[i];
+                }
+                const vol = sum / bufferLength;
+                if (vol > maxVol) maxVol = vol;
+            }, 20);
+
+            setTimeout(() => {
+                clearInterval(checkVol);
+                logDebug(`Hardware Test Result: Max Volume = ${maxVol.toFixed(2)}`);
+                if (maxVol === 0) {
+                    logDebug("WARNING: Microphone input is SILENT. Check system mute or hardware switch.");
+                    alert("检测到麦克风无信号！请检查：\n1. 系统是否静音？\n2. 平板保护套是否遮挡麦克风？\n3. 浏览器是否被禁止录音？");
+                }
+                // Cleanup
+                stream.getTracks().forEach(track => track.stop());
+                audioContext.close();
+            }, 300);
+
+        } catch (err) {
+            logDebug("Audio analysis failed: " + err);
+            stream.getTracks().forEach(track => track.stop());
+        }
     })
     .catch(e => {
-        logDebug(`getUserMedia warning: ${e.message} (Is permission granted?)`);
+        logDebug(`getUserMedia FAILED: ${e.message}. Permission denied?`);
     });
 
   const recognition = new SpeechRecognition();
   currentRecognition = recognition;
 
-  recognition.lang = lang === 'en' ? 'en-US' : 'zh-CN';
+  // ANDROID FIX: Specific Language Codes
+  // 'zh' is sometimes ambiguous. 'cmn-Hans-CN' is safer for Mainland Chinese on Android.
+  recognition.lang = lang === 'en' ? 'en-US' : 'cmn-Hans-CN';
   
   // ANDROID FIX: Set continuous to false. 
-  // Many Android browsers fail to return results if continuous is true, especially in WebViews.
   recognition.continuous = false;
   recognition.interimResults = true; 
   recognition.maxAlternatives = 1;
@@ -407,7 +463,8 @@ export const startSpeechRecognition = (
   // START TIME TRACKING for Safe Stop
   const startTime = Date.now();
   // Minimum time (ms) to wait before allowing stop() to actually fire.
-  const MIN_RECORDING_DURATION = 1200; 
+  // Increased to 2s for slower tablets.
+  const MIN_RECORDING_DURATION = 2000; 
 
   logDebug(`Initializing SpeechRecognition (Lang: ${recognition.lang})`);
 
@@ -468,10 +525,11 @@ export const startSpeechRecognition = (
         } else {
             let msg = "录音已结束，但未识别到内容";
             if (!hasDetectedSound) {
-                msg = "未检测到任何声音，请检查麦克风权限或设备是否静音";
+                msg = "引擎未检测到声音 (No audio signal detected by engine)";
             }
             logDebug(`Error: ${msg}`);
-            alert(msg); // Keep alert for visibility
+            // Only alert if we really think it failed hard, otherwise it gets annoying on retries
+            // alert(msg); 
             onError(msg);
             didReportError = true;
         }
@@ -539,6 +597,9 @@ export const startSpeechRecognition = (
               setTimeout(() => {
                   try { 
                       logDebug("Executing delayed manual stop");
+                      if (!hasDetectedSound) {
+                          logDebug("WARNING: No sound detected even at delayed stop time.");
+                      }
                       recognition.stop(); 
                   } catch(e){
                       logDebug(`Exception delayed stop(): ${e}`);
@@ -547,6 +608,9 @@ export const startSpeechRecognition = (
           } else {
               try { 
                   logDebug("Manual stop triggered");
+                  if (!hasDetectedSound) {
+                      logDebug("WARNING: Stopping, but engine never reported 'onaudiostart'. Input likely dead.");
+                  }
                   recognition.stop(); 
               } catch(e){
                   logDebug(`Exception stop(): ${e}`);
