@@ -393,52 +393,8 @@ export const startSpeechRecognition = (
     currentRecognition = null;
   }
 
-  // TEST HARDWARE AUDIO PRESENCE
-  // This explicitly checks if the mic is sending data
-  navigator.mediaDevices.getUserMedia({ audio: true })
-    .then(stream => {
-        logDebug("Hardware access granted. Analyzing audio stream...");
-        try {
-            const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-            const analyser = audioContext.createAnalyser();
-            const microphone = audioContext.createMediaStreamSource(stream);
-            microphone.connect(analyser);
-            analyser.fftSize = 256;
-            const bufferLength = analyser.frequencyBinCount;
-            const dataArray = new Uint8Array(bufferLength);
-            
-            // Check volume for 200ms
-            let maxVol = 0;
-            const checkVol = setInterval(() => {
-                analyser.getByteFrequencyData(dataArray);
-                let sum = 0;
-                for(let i = 0; i < bufferLength; i++) {
-                    sum += dataArray[i];
-                }
-                const vol = sum / bufferLength;
-                if (vol > maxVol) maxVol = vol;
-            }, 20);
-
-            setTimeout(() => {
-                clearInterval(checkVol);
-                logDebug(`Hardware Test Result: Max Volume = ${maxVol.toFixed(2)}`);
-                if (maxVol === 0) {
-                    logDebug("WARNING: Microphone input is SILENT. Check system mute or hardware switch.");
-                    alert("检测到麦克风无信号！请检查：\n1. 系统是否静音？\n2. 平板保护套是否遮挡麦克风？\n3. 浏览器是否被禁止录音？");
-                }
-                // Cleanup
-                stream.getTracks().forEach(track => track.stop());
-                audioContext.close();
-            }, 300);
-
-        } catch (err) {
-            logDebug("Audio analysis failed: " + err);
-            stream.getTracks().forEach(track => track.stop());
-        }
-    })
-    .catch(e => {
-        logDebug(`getUserMedia FAILED: ${e.message}. Permission denied?`);
-    });
+  // REMOVED: Concurrent getUserMedia check. 
+  // It was causing resource contention on Android tablets, resulting in Max Volume = 0 and silence for SpeechRecognition.
 
   const recognition = new SpeechRecognition();
   currentRecognition = recognition;
