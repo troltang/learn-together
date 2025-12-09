@@ -1,5 +1,5 @@
 
-import { FlashCardText, ScienceQA, EvaluationResult, Age, GameScenario, HandwritingResult, SceneInteraction, ScienceFact } from "../types";
+import { FlashCardText, ScienceQA, EvaluationResult, Age, GameScenario, HandwritingResult, SceneInteraction, ScienceFact, LogicPuzzle, ProgrammingLevel } from "../types";
 
 // 🔴 在线预览专用：请将您的 智谱AI API Key 粘贴在下方引号中
 const HARDCODED_API_KEY = "47023eeb5c024b9fb2149a072e02724f.6D3eXSB64cwze7tZ"; 
@@ -134,28 +134,40 @@ export const generateCardBatch = async (
   }
 };
 
-// --- New AI Image Gen using CogView ---
+// --- New AI Image Gen using CogView (with Retry) ---
 export const generateAIImage = async (prompt: string): Promise<string> => {
     if (!API_KEY) return "https://picsum.photos/400/300";
-    try {
-        const response = await fetch(`${BASE_URL}/images/generations`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${API_KEY}`
-            },
-            body: JSON.stringify({
-                model: "CogView-3-Flash",
-                prompt: prompt,
-            })
-        });
-        if (!response.ok) throw new Error(await response.text());
-        const data = await response.json();
-        return data.data[0].url;
-    } catch (e) {
-        console.error("AI Image Generation Error:", e);
-        return "https://picsum.photos/400/300"; // Fallback
+    
+    const MAX_RETRIES = 3;
+    
+    for (let i = 0; i < MAX_RETRIES; i++) {
+        try {
+            const response = await fetch(`${BASE_URL}/images/generations`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${API_KEY}`
+                },
+                body: JSON.stringify({
+                    model: "CogView-3-Flash",
+                    prompt: prompt,
+                })
+            });
+            if (!response.ok) throw new Error(await response.text());
+            const data = await response.json();
+            return data.data[0].url;
+        } catch (e) {
+            console.warn(`AI Image Generation Attempt ${i + 1}/${MAX_RETRIES} failed:`, e);
+            if (i < MAX_RETRIES - 1) {
+                // Exponential backoff
+                await new Promise(r => setTimeout(r, 1000 * (i + 1)));
+            } else {
+                console.error("AI Image Generation Final Error:", e);
+            }
+        }
     }
+    
+    return "https://picsum.photos/400/300"; // Fallback
 }
 
 // --- 2. Image Generation (Search) ---
@@ -466,4 +478,101 @@ export const chatWithCharacter = async (sceneContext: SceneInteraction, history:
       { role: "user", content: userInput }
   ];
   return await callGLM(messages, "glm-4-flash", 0.8, false);
+};
+
+// --- 5. Logic Puzzles ---
+export const generateLogicPuzzle = async (age: Age): Promise<LogicPuzzle> => {
+  let difficultyContext = "";
+  // Adjust difficulty to be easier for young ones
+  if (age <= 5) {
+      difficultyContext = "Target: 3-5 year olds. VERY SIMPLE. Use 'PATTERN', 'CLASSIFICATION', or 'GUESS_OBJECT'. For Classification, use distinct objects (e.g., 3 Fruits vs 1 Car). For Guess, use a common animal/item. NO MATH.";
+  } else if (age <= 8) {
+      difficultyContext = "Target: 6-8 year olds. Moderate difficulty. Pattern (shapes/colors), Classification (categories), or Guess Object.";
+  } else {
+      difficultyContext = "Target: 9+ year olds. Include 'MATH_LOGIC', more complex patterns, or tricky classifications.";
+  }
+
+  // Randomly select type if not specified by AI (AI chooses best fit for variety)
+  const prompt = `为孩子生成一个独特的逻辑谜题。${difficultyContext}  种子：${Date.now()}。
+  随机选择一种类型： - 图案：补全序列（视觉示例：如🍎，🍌，🍎，？).
+  - 分类：找出不属于同一类的事物（例如，苹果、香蕉、汽车、葡萄）。
+  - GUESS_OBJECT：我会展示一个局部/放大图像，你来猜这是什么。
+  重要提示：
+  
+  1、“imagePrompt”或“partialImagePrompt”必须是一个明确答案目标，高度详细的中文视觉描述，适合于人工智能图像生成器（例如“卡通风格的红色苹果，矢量艺术，白色背景”）；
+  3、"isCorrect"是否正确答案的标志，一般情况只有个正确答案，请严格控制答案的正确性。
+  
+  Return JSON:
+  {
+    "type": "PATTERN" | "CLASSIFICATION" | "GUESS_OBJECT" | "MATH_LOGIC",
+    "question": "Question text in Chinese (e.g. 猜猜这是什么？ or 哪一个是不同的？)",
+    "partialImagePrompt": "中文对 GUESS_OBJECT 的描述: 对该物体的详细视觉描述",
+    "options": [
+      { "id": "A", "content": "Text/Emoji", "isCorrect": boolean, "imagePrompt": "此选项AI生成图像的详细视觉中文描述" },
+      { "id": "B", "content": "...", "isCorrect": boolean, "imagePrompt": "此选项AI生成图像的详细视觉中文描述" }
+    ],
+    "hint": "Subtle hint in Chinese",
+    "explanation": "Explanation in Chinese"
+  }`;
+
+  try {
+    return JSON.parse(await callGLM([{ role: "user", content: prompt }], "glm-4-flash", 0.9));
+  } catch (e) {
+    // Fallback
+    return {
+      type: 'PATTERN',
+      question: "找规律：🍎, 🍌, 🍎, 🍌, ❓",
+      options: [
+        { id: "A", content: "🍎", isCorrect: true, imagePrompt: "Red Apple cartoon" },
+        { id: "B", content: "🍌", isCorrect: false, imagePrompt: "Yellow Banana cartoon" }
+      ],
+      hint: "看看水果是怎么排列的哦",
+      explanation: "苹果和香蕉是轮流出现的。"
+    };
+  }
+};
+
+// --- 6. Coding Levels ---
+export const generateCodingLevel = async (age: Age): Promise<ProgrammingLevel> => {
+  const gridSize = age <= 5 ? 4 : 5;
+  const prompt = `创建一个独一无二的随机编码拼图网格。
+  网格大小：${gridSize}x${gridSize}。
+  年龄：${age}。
+  种子：${Date.now()}。
+  模式（随机选择一个）：- 经典模式：达到目标。
+  - 收集：收集所有“物品”，然后达到目标。
+  - 调试：提供的“brokenCode”有误。请修正。
+  要求：1. 主题：随机（太空、森林、海洋、城市）。
+  2. 随机化起点和终点（确保路径存在）。
+  3. 障碍：对幼儿来说，障碍很少。
+  4. 项目：若为COLLECTION模式，则在路径上放置1-2个项目。
+  5. BrokenCode：若处于调试模式，请提供遇到障碍或未命中目标的命令列表。
+    
+  Return JSON:
+  {
+    "mode": "CLASSIC" | "COLLECTION" | "DEBUG",
+    "theme": "Space" | "Forest" | "Ocean" | "City",
+    "gridSize": ${gridSize},
+    "start": { "x": 0, "y": 0, "dir": 1 }, 
+    "target": { "x": 2, "y": 2 },
+    "obstacles": [{ "x": 1, "y": 1 }],
+    "items": [{ "x": 1, "y": 0 }],
+    "brokenCode": ["F", "F", "L"], 
+    "introText": "Story intro in Chinese based on theme"
+  }`;
+
+  try {
+    return JSON.parse(await callGLM([{ role: "user", content: prompt }], "glm-4-flash", 0.9));
+  } catch (e) {
+    return {
+      gridSize: 4,
+      mode: 'CLASSIC',
+      theme: 'Forest',
+      start: { x: 0, y: 0, dir: 1 },
+      target: { x: 3, y: 0 },
+      obstacles: [{ x: 1, y: 0 }],
+      items: [],
+      introText: "帮小熊回家！"
+    };
+  }
 };

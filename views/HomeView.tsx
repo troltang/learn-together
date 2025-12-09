@@ -70,6 +70,13 @@ const HomeView: React.FC<HomeViewProps> = ({ onNavigate, progress }) => {
       color: 'bg-blue-400',
     },
     {
+      id: AppView.LOGIC,
+      title: '思维训练',
+      subtitle: 'Logic',
+      icon: '🧠',
+      color: 'bg-indigo-400',
+    },
+    {
       id: AppView.WRITING, 
       title: '写字练习',
       subtitle: 'Writing',
@@ -92,6 +99,13 @@ const HomeView: React.FC<HomeViewProps> = ({ onNavigate, progress }) => {
       subtitle: 'Adventure',
       icon: '🗺️',
       color: 'bg-green-400',
+    },
+    {
+      id: AppView.PROGRAMMING,
+      title: '小小编程',
+      subtitle: 'Coding',
+      icon: '🤖',
+      color: 'bg-gray-800', // Or a techy blue
     },
     {
       id: AppView.SCENE,

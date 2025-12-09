@@ -10,7 +10,9 @@ import SceneView from './views/SceneView';
 import WritingView from './views/WritingView';
 import DrawingView from './views/DrawingView';
 import MathView from './views/MathView';
-import DiagnosticsView from './views/DiagnosticsView'; // Import
+import LogicView from './views/LogicView'; // New
+import ProgrammingView from './views/ProgrammingView'; // New
+import DiagnosticsView from './views/DiagnosticsView';
 import { AppView, UserProgress, ModuleProgress, Age, HistoryItem, FlashCard, ScienceQA, VoiceId } from './types';
 import { refreshTTSOnlineToken } from './utils/audioUtils';
 
@@ -25,6 +27,8 @@ const INITIAL_PROGRESS: UserProgress = {
   [AppView.GAME]: { ...INITIAL_MODULE_STATE },
   [AppView.SCENE]: { ...INITIAL_MODULE_STATE },
   [AppView.DRAWING]: { ...INITIAL_MODULE_STATE },
+  [AppView.LOGIC]: { ...INITIAL_MODULE_STATE }, // New
+  [AppView.PROGRAMMING]: { ...INITIAL_MODULE_STATE }, // New
 };
 
 const XP_PER_LEVEL = 100;
@@ -49,10 +53,12 @@ const App: React.FC = () => {
     if (savedProgress) {
       try {
         const parsed = JSON.parse(savedProgress);
-        // Ensure new modules exist in saved data
+        // Ensure new modules exist in saved data (migration)
         if (!parsed[AppView.WRITING]) parsed[AppView.WRITING] = { ...INITIAL_MODULE_STATE };
         if (!parsed[AppView.DRAWING]) parsed[AppView.DRAWING] = { ...INITIAL_MODULE_STATE };
         if (!parsed[AppView.MATH]) parsed[AppView.MATH] = { ...INITIAL_MODULE_STATE };
+        if (!parsed[AppView.LOGIC]) parsed[AppView.LOGIC] = { ...INITIAL_MODULE_STATE };
+        if (!parsed[AppView.PROGRAMMING]) parsed[AppView.PROGRAMMING] = { ...INITIAL_MODULE_STATE };
         
         setProgress(prev => ({ ...prev, ...parsed }));
       } catch (e) { console.error("Failed to load progress", e); }
@@ -236,6 +242,26 @@ const App: React.FC = () => {
             voiceId={voiceId}
             onUpdateProgress={(xp, items) => handleUpdateProgress(AppView.DRAWING, xp, items)}
             onAddToHistory={(data) => handleAddToHistory({ type: 'DRAWING', data, preview: data.topic })}
+          />
+        );
+      case AppView.LOGIC:
+        return (
+          <LogicView
+            key={`logic-${viewKey}`}
+            difficulty={age}
+            voiceId={voiceId}
+            onUpdateProgress={(xp, items) => handleUpdateProgress(AppView.LOGIC, xp, items)}
+            onAddToHistory={(data) => handleAddToHistory({ type: 'LOGIC', data, preview: data.question })}
+          />
+        );
+      case AppView.PROGRAMMING:
+        return (
+          <ProgrammingView
+            key={`prog-${viewKey}`}
+            difficulty={age}
+            voiceId={voiceId}
+            onUpdateProgress={(xp, items) => handleUpdateProgress(AppView.PROGRAMMING, xp, items)}
+            onAddToHistory={(data) => handleAddToHistory({ type: 'PROGRAMMING', data, preview: "Coding Level" })}
           />
         );
       default:

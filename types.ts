@@ -1,4 +1,5 @@
 
+
 export enum AppView {
   HOME = 'HOME',
   ENGLISH = 'ENGLISH',
@@ -10,7 +11,9 @@ export enum AppView {
   SCENE = 'SCENE',
   DRAWING = 'DRAWING', 
   MATH = 'MATH',
-  DIAGNOSTICS = 'DIAGNOSTICS', // New Diagnostic View
+  LOGIC = 'LOGIC',         // New
+  PROGRAMMING = 'PROGRAMMING', // New
+  DIAGNOSTICS = 'DIAGNOSTICS',
 }
 
 export enum LoadingState {
@@ -95,6 +98,35 @@ export interface SceneInteraction {
   openingLine: string;
 }
 
+// --- NEW TYPES FOR LOGIC & PROGRAMMING ---
+
+export interface LogicPuzzle {
+  type: 'PATTERN' | 'CLASSIFICATION' | 'GUESS_OBJECT' | 'MATH_LOGIC'; // Added types
+  question: string;
+  options: {
+    id: string;
+    content: string; 
+    isCorrect: boolean;
+    imagePrompt?: string;
+    imageUrl?: string; // Loaded at runtime
+  }[];
+  hint: string;
+  explanation: string;
+  partialImagePrompt?: string; // For GUESS_OBJECT
+}
+
+export interface ProgrammingLevel {
+  gridSize: number; // e.g. 5 for 5x5
+  mode: 'CLASSIC' | 'COLLECTION' | 'DEBUG';
+  theme: 'Space' | 'Forest' | 'Ocean' | 'City';
+  start: { x: number, y: number; dir: number }; // dir: 0=Up, 1=Right, 2=Down, 3=Left
+  target: { x: number, y: number };
+  obstacles: { x: number, y: number }[];
+  items?: { x: number, y: number }[]; // For COLLECTION mode
+  brokenCode?: string[]; // For DEBUG mode (initial broken sequence)
+  introText: string;
+}
+
 export interface ModuleProgress {
   xp: number;       
   level: number;    
@@ -110,13 +142,15 @@ export interface UserProgress {
   [AppView.GAME]: ModuleProgress;
   [AppView.SCENE]: ModuleProgress;
   [AppView.DRAWING]: ModuleProgress;
+  [AppView.LOGIC]: ModuleProgress;       // New
+  [AppView.PROGRAMMING]: ModuleProgress; // New
 }
 
 export interface HistoryItem {
   id: string;
-  type: 'FLASHCARD' | 'SCIENCE' | 'WRITING' | 'DRAWING' | 'MATH';
+  type: 'FLASHCARD' | 'SCIENCE' | 'WRITING' | 'DRAWING' | 'MATH' | 'LOGIC' | 'PROGRAMMING';
   timestamp: number;
-  data: FlashCard | ScienceQA | ScienceFact | { char: string, type: string } | { topic: string } | { question: string, result: string };
+  data: FlashCard | ScienceQA | ScienceFact | { char: string, type: string } | { topic: string } | { question: string, result: string } | LogicPuzzle | ProgrammingLevel;
   mode?: AppView; 
   preview: string;
 }

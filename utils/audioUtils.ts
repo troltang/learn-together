@@ -1,4 +1,3 @@
-
 import { VoiceId } from '../types';
 
 let currentAudio: HTMLAudioElement | null = null;
@@ -17,7 +16,6 @@ let TTS_TOKEN = 'a72250317ca2ff2d27f01dabbef32ac3';
 let currentRecognition: any = null;
 
 // --- DEBUGGING UTILS ---
-// Debug mode disabled by default now that we have a dedicated Diagnostics View
 const DEBUG_MODE = false; 
 
 const ensureDebugOverlay = () => {
@@ -320,6 +318,7 @@ export const cancelAudio = () => {
   sequenceCancelled = true;
   if (currentAudio) {
     currentAudio.pause();
+    currentAudio.currentTime = 0; // Reset
     currentAudio = null;
   }
   if (window.speechSynthesis) {
@@ -368,9 +367,6 @@ export const playSequence = async (texts: string[], voiceId: VoiceId) => {
     }
 };
 
-// Removed wakeUpMicrophone - it can cause conflicts on some devices if called automatically.
-// The Diagnostics view will handle manual warmup.
-
 export const startSpeechRecognition = (
   lang: 'en' | 'zh',
   onResult: (text: string) => void,
@@ -393,206 +389,232 @@ export const startSpeechRecognition = (
         logDebug("Stopping existing recognition instance...");
         currentRecognition.onend = null; 
         currentRecognition.onerror = null;
-        currentRecognition.abort(); // Use abort for immediate kill
+        currentRecognition.abort(); 
     } catch(e) {}
     currentRecognition = null;
   }
   // Force audio to stop to release hardware focus
   cancelAudio();
 
-  const recognition = new SpeechRecognition();
-  currentRecognition = recognition;
+  // Active instance reference for stop/abort
+  let activeInstance: any = null;
+  let retryCount = 0;
+  const MAX_RETRIES = 4; // Increased retries
+  let hasManuallyStopped = false;
 
-  // ANDROID FIX: Specific Language Codes
-  recognition.lang = lang === 'en' ? 'en-US' : 'cmn-Hans-CN';
-  
-  // ANDROID FIX: Set continuous to false. 
-  recognition.continuous = false;
-  recognition.interimResults = true; 
-  recognition.maxAlternatives = 1;
+  const startInternal = () => {
+      const recognition = new SpeechRecognition();
+      activeInstance = recognition;
+      currentRecognition = recognition;
 
-  let finalTranscript = '';
-  let interimTranscript = '';
-  let hasReturnedResult = false;
-  let didReportError = false;
-  
-  // Track audio signals
-  let hasDetectedSound = false;
-  
-  // START TIME TRACKING for Safe Stop
-  let startTime = 0;
-  const MIN_RECORDING_DURATION = 1500; // Slightly reduced to feel more responsive
-  let watchdogTimer: any = null;
-
-  logDebug(`Initializing SpeechRecognition (Lang: ${recognition.lang})`);
-
-  recognition.onstart = () => {
-      startTime = Date.now();
-      logDebug("Event: onstart (Microphone active)");
-      
-      // WATCHDOG: If no sound detected in 2.5s, likely hung. Kill it.
-      watchdogTimer = setTimeout(() => {
-          if (!hasDetectedSound && !hasReturnedResult && !didReportError) {
-              logDebug("WATCHDOG: Audio engine hung (no sound detected). Aborting.");
-              recognition.abort();
-              didReportError = true;
-              onError("麦克风无响应，请重试 (Timeout)");
-          }
-      }, 2500);
-  };
-
-  recognition.onaudiostart = () => {
-      hasDetectedSound = true;
-      logDebug("Event: onaudiostart (Hardware Audio detected)");
-  };
-
-  recognition.onsoundstart = () => {
-      hasDetectedSound = true;
-      logDebug("Event: onsoundstart (Sound detected)");
-  };
-
-  recognition.onspeechstart = () => {
-      hasDetectedSound = true;
-      logDebug("Event: onspeechstart (Speech detected)");
-  };
-
-  recognition.onresult = (event: any) => {
-    if (watchdogTimer) clearTimeout(watchdogTimer);
-    
-    // Re-calc interim every time
-    let currentInterim = '';
-    hasDetectedSound = true; // Definitely heard something if we have results
-    
-    for (let i = event.resultIndex; i < event.results.length; ++i) {
-      if (event.results[i].isFinal) {
-        finalTranscript += event.results[i][0].transcript;
-        logDebug(`Result [Final]: ${event.results[i][0].transcript}`);
+      // ANDROID FIX: Language Code Rotation
+      // Some Android WebViews fail with 'cmn-Hans-CN' but work with 'zh-CN', or vice versa.
+      if (lang === 'en') {
+          recognition.lang = 'en-US';
       } else {
-        currentInterim += event.results[i][0].transcript;
+          // Retry 0: zh-CN (Standard)
+          // Retry 1: cmn-Hans-CN (Android specific)
+          // Retry 2: zh (Generic)
+          const langs = ['zh-CN', 'cmn-Hans-CN', 'zh'];
+          recognition.lang = langs[retryCount % langs.length];
       }
-    }
-    interimTranscript = currentInterim;
-    if (interimTranscript) {
-        logDebug(`Result [Interim Accum]: ${interimTranscript}`);
-    }
-  };
+      
+      recognition.continuous = false;
+      recognition.interimResults = true; 
+      recognition.maxAlternatives = 1;
 
-  recognition.onend = () => {
-    if (watchdogTimer) clearTimeout(watchdogTimer);
-    logDebug("Event: onend (Recording stopped)");
-    
-    if (currentRecognition === recognition) {
-        currentRecognition = null;
-    }
-    
-    if (!hasReturnedResult && !didReportError) {
-        // Fallback: Combine whatever we captured
-        const fullText = (finalTranscript + interimTranscript).trim();
+      let finalTranscript = '';
+      let interimTranscript = '';
+      let hasReturnedResult = false;
+      let didReportError = false;
+      
+      let hasDetectedSound = false;
+      let startTime = 0;
+      let watchdogTimer: any = null;
+      let kickstartTimer: any = null;
+
+      logDebug(`Initializing SpeechRecognition (Lang: ${recognition.lang}) (Retry: ${retryCount})`);
+
+      recognition.onstart = () => {
+          startTime = Date.now();
+          logDebug("Event: onstart (Microphone active)");
+          
+          // KICKSTART: If no audio detected in 3000ms (Relaxed), reboot.
+          if (retryCount < MAX_RETRIES) {
+              kickstartTimer = setTimeout(() => {
+                  if (!hasDetectedSound && !hasManuallyStopped && activeInstance === recognition) {
+                      logDebug("KICKSTART: Audio engine seems deaf. Rebooting...");
+                      retryCount++;
+                      recognition.abort();
+                      // Backoff delay
+                      setTimeout(startInternal, retryCount * 500); 
+                  }
+              }, 3000);
+          }
+
+          // WATCHDOG: Increased to 10s
+          watchdogTimer = setTimeout(() => {
+              if (!hasDetectedSound && !hasReturnedResult && !didReportError && !hasManuallyStopped) {
+                  logDebug("WATCHDOG: Audio engine hung. Aborting.");
+                  recognition.abort();
+                  didReportError = true;
+                  onError("麦克风无响应，请重试 (Timeout)");
+              }
+          }, 10000); 
+      };
+
+      recognition.onaudiostart = () => {
+          hasDetectedSound = true;
+          if (kickstartTimer) clearTimeout(kickstartTimer);
+          logDebug("Event: onaudiostart (Audio Detected)");
+      };
+
+      recognition.onsoundstart = () => { hasDetectedSound = true; };
+      recognition.onspeechstart = () => { hasDetectedSound = true; };
+
+      recognition.onresult = (event: any) => {
+        if (watchdogTimer) clearTimeout(watchdogTimer);
+        if (kickstartTimer) clearTimeout(kickstartTimer);
+        hasDetectedSound = true; 
         
-        logDebug(`Processing end result. Captured: "${fullText}"`);
-
-        if (fullText) {
-            hasReturnedResult = true;
-            logDebug(`Submitting success: "${fullText}"`);
-            onResult(fullText);
-        } else {
-            let msg = "录音已结束，但未识别到内容";
-            if (!hasDetectedSound) {
-                msg = "引擎未检测到声音 (No audio signal detected)";
-            }
-            logDebug(`Error: ${msg}`);
-            onError(msg);
-            didReportError = true;
+        let currentInterim = '';
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          if (event.results[i].isFinal) {
+            finalTranscript += event.results[i][0].transcript;
+            logDebug(`Result [Final]: ${event.results[i][0].transcript}`);
+          } else {
+            currentInterim += event.results[i][0].transcript;
+          }
         }
-    }
-    onEnd(); 
+        interimTranscript = currentInterim;
+        if (interimTranscript) logDebug(`Result [Interim]: ${interimTranscript}`);
+      };
+
+      recognition.onend = () => {
+        if (watchdogTimer) clearTimeout(watchdogTimer);
+        if (kickstartTimer) clearTimeout(kickstartTimer);
+        logDebug("Event: onend (Stopped)");
+        
+        if (currentRecognition === recognition) {
+            currentRecognition = null;
+        }
+        
+        const duration = Date.now() - startTime;
+        if (!hasReturnedResult && !didReportError && !hasManuallyStopped) {
+            // Check for "Instant Death" (< 500ms duration)
+            if (duration < 500 && retryCount < MAX_RETRIES) {
+                const delay = (retryCount + 1) * 300; // Backoff
+                logDebug(`Session died instantly (${duration}ms). Retry #${retryCount + 1} in ${delay}ms...`);
+                retryCount++;
+                setTimeout(startInternal, delay);
+                return;
+            }
+        }
+
+        if (!hasReturnedResult && !didReportError) {
+            const fullText = (finalTranscript + interimTranscript).trim();
+            if (fullText) {
+                hasReturnedResult = true;
+                logDebug(`Submitting success: "${fullText}"`);
+                onResult(fullText);
+            } else {
+                // AUTO RETRY ON SILENCE
+                if (!hasDetectedSound && !hasManuallyStopped && retryCount < MAX_RETRIES) {
+                     logDebug(`Silent end detected (Duration: ${duration}ms). Retrying...`);
+                     retryCount++;
+                     setTimeout(startInternal, 500);
+                     return;
+                }
+
+                let msg = "录音已结束，但未识别到内容";
+                if (!hasDetectedSound && !hasManuallyStopped) {
+                    msg = "引擎未检测到声音 (No audio signal detected)";
+                }
+                logDebug(`Error: ${msg}`);
+                if (!hasManuallyStopped) onError(msg);
+                didReportError = true;
+            }
+        }
+        onEnd(); 
+      };
+
+      recognition.onerror = (event: any) => {
+        if (watchdogTimer) clearTimeout(watchdogTimer);
+        if (kickstartTimer) clearTimeout(kickstartTimer);
+        if (currentRecognition === recognition) currentRecognition = null;
+        
+        if (event.error === 'aborted') {
+            logDebug("Event: error (aborted)");
+            // If aborted happened very fast, it might be the Android bug
+            const duration = Date.now() - startTime;
+            if (duration < 1000 && retryCount < MAX_RETRIES && !hasManuallyStopped) {
+                 const delay = (retryCount + 1) * 300;
+                 logDebug(`Fast abort. Retry #${retryCount+1} in ${delay}ms...`);
+                 retryCount++;
+                 setTimeout(startInternal, delay);
+                 return;
+            }
+            return;
+        }
+
+        const errorStr = `Speech error: ${event.error} ${event.message ? '- ' + event.message : ''}`;
+        console.error(errorStr);
+        logDebug(`Event: onError - ${event.error}`);
+
+        // Retry on no-speech if fast (glitch) or if we still have retries
+        // Note: 'no-speech' usually means it timed out waiting for audio.
+        const duration = Date.now() - startTime;
+        if (event.error === 'no-speech' && retryCount < MAX_RETRIES && !hasManuallyStopped) {
+             const delay = (retryCount + 1) * 300;
+             logDebug(`No speech detected. Retry #${retryCount+1} in ${delay}ms...`);
+             retryCount++;
+             setTimeout(startInternal, delay);
+             return;
+        }
+
+        let msg = `语音识别出错 (${event.error})`;
+        if (event.error === 'no-speech') msg = "未检测到声音 (no-speech)";
+        else if (event.error === 'not-allowed' || event.error === 'service-not-allowed') msg = "请允许麦克风权限 (not-allowed)";
+        else if (event.error === 'network') msg = "网络连接不稳定 (network)";
+        else if (event.error === 'audio-capture') msg = "麦克风被占用或无音频输入 (audio-capture)";
+
+        if (event.message) msg += ` - ${event.message}`;
+
+        if (!hasReturnedResult) {
+            didReportError = true;
+            logDebug(`Reporting Fatal Error: ${msg}`);
+            onError(msg);
+        }
+      };
+
+      try {
+        logDebug("Calling recognition.start()...");
+        recognition.start();
+      } catch (e) {
+        console.error(e);
+        const errMsg = "无法启动录音，请刷新页面重试";
+        logDebug(`Exception start(): ${e}`);
+        onError(errMsg);
+      }
   };
 
-  recognition.onerror = (event: any) => {
-    if (watchdogTimer) clearTimeout(watchdogTimer);
-    if (currentRecognition === recognition) {
-        currentRecognition = null;
-    }
-    
-    if (event.error === 'aborted') {
-        logDebug("Event: error (aborted) - ignoring");
-        return;
-    }
+  // Start the first attempt
+  startInternal();
 
-    const errorStr = `Speech recognition error: ${event.error} ${event.message ? '- ' + event.message : ''}`;
-    console.error(errorStr);
-    logDebug(`Event: onError - ${event.error}`);
-
-    let msg = `语音识别出错 (${event.error})`;
-    if (event.error === 'no-speech') {
-        msg = "未检测到声音 (no-speech)";
-    } else if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
-        msg = "请允许麦克风权限 (not-allowed)";
-    } else if (event.error === 'network') {
-        msg = "网络连接不稳定 (network)";
-    } else if (event.error === 'audio-capture') {
-        msg = "麦克风被占用或无音频输入 (audio-capture)";
-    }
-
-    if (event.message) {
-        msg += ` - ${event.message}`;
-    }
-
-    if (!hasReturnedResult) {
-        didReportError = true;
-        logDebug(`Reporting Fatal Error: ${msg}`);
-        // alert(msg); // Reduced alert spam
-        onError(msg);
-    }
-  };
-
-  // CRITICAL FIX: Synchronous Start
-  // On some mobile browsers, audio context/recording must be started strictly inside the user event handler.
-  // Previous version used setTimeout which broke this chain.
-  try {
-    logDebug("Calling recognition.start()...");
-    recognition.start();
-  } catch (e) {
-    console.error(e);
-    const errMsg = "无法启动录音，请刷新页面重试";
-    logDebug(`Exception start(): ${e}`);
-    onError(errMsg);
-  }
-
-  // Return a safe wrapper with Delayed Stop Logic
+  // Return a safe wrapper
   return {
       stop: () => {
-          // If called too fast (before start even really fired), handle gracefully
-          if (startTime === 0) {
-              // Just in case
-              try { recognition.stop(); } catch(e){}
-              return;
-          }
-
-          const elapsed = Date.now() - startTime;
-          const remaining = MIN_RECORDING_DURATION - elapsed;
-          
-          if (remaining > 0) {
-              logDebug(`Stop triggered early (${elapsed}ms). Safe Stop waiting ${remaining}ms...`);
-              setTimeout(() => {
-                  try { 
-                      logDebug("Executing delayed manual stop");
-                      recognition.stop(); 
-                  } catch(e){
-                      logDebug(`Exception delayed stop(): ${e}`);
-                  }
-              }, remaining);
-          } else {
-              try { 
-                  logDebug("Manual stop triggered");
-                  recognition.stop(); 
-              } catch(e){
-                  logDebug(`Exception stop(): ${e}`);
-              }
+          hasManuallyStopped = true;
+          try { 
+              logDebug("Manual stop triggered");
+              if (activeInstance) activeInstance.stop(); 
+          } catch(e){
+              logDebug(`Exception stop(): ${e}`);
           }
       },
       abort: () => {
-          try { recognition.abort(); } catch(e){}
+          hasManuallyStopped = true;
+          try { if (activeInstance) activeInstance.abort(); } catch(e){}
       }
   };
 };

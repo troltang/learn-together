@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect } from 'react';
 import { AppView } from '../types';
 import { speakText, cancelAudio } from '../utils/audioUtils';
@@ -105,34 +104,48 @@ const DiagnosticsView: React.FC<DiagnosticsViewProps> = ({ onNavigate }) => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) { addLog("API not supported."); return; }
     
-    stopMicTest(); // Ensure clean slate
-    addLog("Initializing SpeechRecognition...");
+    // Safety Delay
+    stopMicTest(); 
+    addLog("Stopping HW test... waiting 1000ms...");
     
-    const recognition = new SpeechRecognition();
-    recognitionRef.current = recognition;
-    recognition.lang = 'cmn-Hans-CN'; // Default Chinese
-    recognition.continuous = false;
-    recognition.interimResults = true;
-    
-    recognition.onstart = () => addLog("Event: onstart");
-    recognition.onaudiostart = () => addLog("Event: onaudiostart (Audio Detected)");
-    recognition.onsoundstart = () => addLog("Event: onsoundstart");
-    recognition.onspeechstart = () => addLog("Event: onspeechstart");
-    recognition.onend = () => addLog("Event: onend");
-    recognition.onerror = (e: any) => addLog(`Event: onerror [${e.error}] ${e.message || ''}`);
-    recognition.onresult = (e: any) => {
-        const res = e.results[e.resultIndex];
-        const text = res[0].transcript;
-        addLog(`Event: onresult (${res.isFinal ? 'Final' : 'Interim'}): "${text}"`);
-    };
-    
-    try {
-        recognition.start();
-        addLog("Called recognition.start()");
-    } catch(e: any) {
-        addLog(`Exception calling start(): ${e.message}`);
-    }
+    setTimeout(() => {
+        addLog("Initializing SpeechRecognition...");
+        
+        const recognition = new SpeechRecognition();
+        recognitionRef.current = recognition;
+        recognition.lang = 'zh-CN'; 
+        recognition.continuous = false;
+        recognition.interimResults = true;
+        
+        recognition.onstart = () => addLog("Event: onstart");
+        recognition.onaudiostart = () => addLog("Event: onaudiostart (Audio Detected)");
+        recognition.onsoundstart = () => addLog("Event: onsoundstart");
+        recognition.onspeechstart = () => addLog("Event: onspeechstart");
+        recognition.onend = () => addLog("Event: onend");
+        recognition.onerror = (e: any) => addLog(`Event: onerror [${e.error}] ${e.message || ''}`);
+        recognition.onresult = (e: any) => {
+            const res = e.results[e.resultIndex];
+            const text = res[0].transcript;
+            addLog(`Event: onresult (${res.isFinal ? 'Final' : 'Interim'}): "${text}"`);
+        };
+        
+        try {
+            recognition.start();
+            addLog("Called recognition.start()");
+        } catch(e: any) {
+            addLog(`Exception calling start(): ${e.message}`);
+        }
+    }, 1000);
   };
+
+  const manualKick = () => {
+      addLog("Manually aborting...");
+      if (recognitionRef.current) recognitionRef.current.abort();
+      setTimeout(() => {
+          addLog("Manually restarting...");
+          try { recognitionRef.current.start(); } catch(e: any) { addLog(e.message) }
+      }, 200);
+  }
 
   const testTTS = () => {
       addLog("Testing TTS...");
@@ -171,12 +184,17 @@ const DiagnosticsView: React.FC<DiagnosticsViewProps> = ({ onNavigate }) => {
         <div className="border border-green-800 p-4 rounded bg-gray-900">
             <h3 className="font-bold mb-2">2. Software (Speech API)</h3>
             <p className="text-xs text-gray-400 mb-2">Tests browser's native recognition engine.</p>
-            <button 
-                onClick={testRecognition} 
-                className="w-full py-2 mb-2 bg-blue-700 text-white font-bold hover:bg-blue-600"
-            >
-                TRIGGER RECOGNITION
-            </button>
+            <div className="flex gap-2">
+                <button 
+                    onClick={testRecognition} 
+                    className="flex-1 py-2 mb-2 bg-blue-700 text-white font-bold hover:bg-blue-600"
+                >
+                    START RECOGNITION
+                </button>
+                <button onClick={manualKick} className="px-2 py-2 mb-2 bg-yellow-700 text-white font-bold hover:bg-yellow-600" title="Restart">
+                    ⚡
+                </button>
+            </div>
             <p className="text-xs text-yellow-500">Note: Hold tablet close. Speak loudly.</p>
         </div>
 
