@@ -10,6 +10,7 @@ export enum AppView {
   SCENE = 'SCENE',
   DRAWING = 'DRAWING', 
   MATH = 'MATH',
+  DIAGNOSTICS = 'DIAGNOSTICS', // New Diagnostic View
 }
 
 export enum LoadingState {

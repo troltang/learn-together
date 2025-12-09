@@ -10,6 +10,7 @@ import SceneView from './views/SceneView';
 import WritingView from './views/WritingView';
 import DrawingView from './views/DrawingView';
 import MathView from './views/MathView';
+import DiagnosticsView from './views/DiagnosticsView'; // Import
 import { AppView, UserProgress, ModuleProgress, Age, HistoryItem, FlashCard, ScienceQA, VoiceId } from './types';
 import { refreshTTSOnlineToken } from './utils/audioUtils';
 
@@ -148,7 +149,8 @@ const App: React.FC = () => {
     switch (currentView) {
       case AppView.HOME:
         return <HomeView onNavigate={handleNavigate} progress={progress} />;
-      
+      case AppView.DIAGNOSTICS:
+        return <DiagnosticsView onNavigate={handleNavigate} />;
       case AppView.ENGLISH:
         return (
           <FlashCardView 

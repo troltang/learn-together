@@ -178,6 +178,13 @@ const HomeView: React.FC<HomeViewProps> = ({ onNavigate, progress }) => {
            <div className="w-2 flex-shrink-0"></div>
         </ScrollContainer>
       </section>
+
+      {/* Diagnostics Link */}
+      <div className="text-center mt-8">
+          <button onClick={() => onNavigate(AppView.DIAGNOSTICS)} className="text-gray-300 hover:text-gray-500 text-sm p-2" title="系统诊断">
+              🛠️
+          </button>
+      </div>
     </div>
   );
 };

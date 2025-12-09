@@ -1,3 +1,4 @@
+
 import { VoiceId } from '../types';
 
 let currentAudio: HTMLAudioElement | null = null;
@@ -16,7 +17,8 @@ let TTS_TOKEN = 'a72250317ca2ff2d27f01dabbef32ac3';
 let currentRecognition: any = null;
 
 // --- DEBUGGING UTILS ---
-const DEBUG_MODE = true; // Toggle this to false when done debugging
+// Debug mode disabled by default now that we have a dedicated Diagnostics View
+const DEBUG_MODE = false; 
 
 const ensureDebugOverlay = () => {
     if (!DEBUG_MODE) return;
@@ -366,6 +368,9 @@ export const playSequence = async (texts: string[], voiceId: VoiceId) => {
     }
 };
 
+// Removed wakeUpMicrophone - it can cause conflicts on some devices if called automatically.
+// The Diagnostics view will handle manual warmup.
+
 export const startSpeechRecognition = (
   lang: 'en' | 'zh',
   onResult: (text: string) => void,
@@ -416,7 +421,7 @@ export const startSpeechRecognition = (
   
   // START TIME TRACKING for Safe Stop
   let startTime = 0;
-  const MIN_RECORDING_DURATION = 2000; 
+  const MIN_RECORDING_DURATION = 1500; // Slightly reduced to feel more responsive
   let watchdogTimer: any = null;
 
   logDebug(`Initializing SpeechRecognition (Lang: ${recognition.lang})`);
@@ -541,28 +546,26 @@ export const startSpeechRecognition = (
     }
   };
 
-  // 2. DELAYED START (Warm-up)
-  logDebug("Queueing start with 100ms delay...");
-  setTimeout(() => {
-      try {
-        if (currentRecognition !== recognition) return; // Cancelled during delay
-        logDebug("Calling recognition.start()...");
-        recognition.start();
-      } catch (e) {
-        console.error(e);
-        const errMsg = "无法启动录音，请刷新页面重试";
-        logDebug(`Exception start(): ${e}`);
-        onError(errMsg);
-      }
-  }, 100);
+  // CRITICAL FIX: Synchronous Start
+  // On some mobile browsers, audio context/recording must be started strictly inside the user event handler.
+  // Previous version used setTimeout which broke this chain.
+  try {
+    logDebug("Calling recognition.start()...");
+    recognition.start();
+  } catch (e) {
+    console.error(e);
+    const errMsg = "无法启动录音，请刷新页面重试";
+    logDebug(`Exception start(): ${e}`);
+    onError(errMsg);
+  }
 
   // Return a safe wrapper with Delayed Stop Logic
   return {
       stop: () => {
+          // If called too fast (before start even really fired), handle gracefully
           if (startTime === 0) {
-              // start() hasn't fired onstart yet, or delayed start hasn't run
-              logDebug("Stop called before start() completed. Aborting.");
-              try { recognition.abort(); } catch(e){}
+              // Just in case
+              try { recognition.stop(); } catch(e){}
               return;
           }
 
